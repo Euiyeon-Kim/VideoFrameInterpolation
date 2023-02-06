@@ -1,0 +1,31 @@
+seed: 806
+
+# Model
+model_name: IFRNet
+flow_dir: flow
+distill_bwd: True                            # True: learn ft0  False: learn f01
+
+# Data
+data_name: Vimeo90K                          # Vimeo90K, X4K
+root: datasets/vimeo_triplet                 # vimeo_triplet, X4K1000FPS
+crop_h: 224
+crop_w: 224
+batch_size: 6
+num_workers: 8
+val_datasets:
+  - vimeo90k
+save_best_benchmark: vimeo90k
+
+# Training
+start_lr: 1.0e-4
+end_lr: 1.0e-5
+num_epochs: 300
+grad_clip: 1.0
+
+# Logging
+img_summary_freq_step: 1000
+metric_summary_freq_step: 1000
+save_latest_freq: 2000
+save_freq_epoch: 50
+valid_freq_epoch: 1
+
