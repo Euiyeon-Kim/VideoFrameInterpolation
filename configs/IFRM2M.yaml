@@ -1,9 +1,10 @@
 seed: 806
 
 # Model
-model_name: IFRNet
-flow_dir: flow
-distill_bwd: True                            # True: learn ft0  False: learn f01
+model_name: IFRM2Mv1
+m2m_branch: 5
+flow_dir: gmflow_scale2_refine6
+distill_bwd: False                            # True: learn ft0  False: learn f01
 
 # Data
 data_name: Vimeo90K                          # Vimeo90K, X4K
@@ -22,10 +23,10 @@ end_lr: 1.0e-5
 resume_epoch: 0
 num_epochs: 300
 grad_clip: 1.0
+distill_lambda: 0.1
 
 # Logging
-img_summary_freq: 1000
+img_summary_freq: 100
 metric_summary_freq: 100
 save_latest_freq: 2000
 valid_freq_epoch: 1
-

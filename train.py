@@ -100,7 +100,6 @@ def train(args, ddp_model):
                     }, checkpoint_path)
 
             iters += 1
-            break
 
         if (epoch + 1) % args.valid_freq_epoch == 0 and local_rank == 0:
             val_results = {}
