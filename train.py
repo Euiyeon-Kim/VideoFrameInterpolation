@@ -150,7 +150,7 @@ if __name__ == '__main__':
     args.device = torch.device('cuda', args.local_rank)
 
     # Set Environment - seed & optimization
-    utils.set_seed(seed=args.seed)
+    # utils.set_seed(seed=args.seed)
     torch.backends.cudnn.benchmark = True
     torch.autograd.set_detect_anomaly(True)
 

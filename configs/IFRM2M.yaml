@@ -26,7 +26,7 @@ grad_clip: 1.0
 distill_lambda: 0.1
 
 # Logging
-img_summary_freq: 100
+img_summary_freq: 1000
 metric_summary_freq: 100
 save_latest_freq: 2000
 valid_freq_epoch: 1

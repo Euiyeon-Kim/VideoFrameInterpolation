@@ -5,7 +5,11 @@
 ---
 
 **IFRM2Mv1**
-- Decoder 하나마다 z0, z1 다 예측
+- Decoder4에서 f01_4, f10_4 예측
+- f01_4, f10_4 이미지 downsample해서 bwarp -> z0_4, z1_4 예측
+- Decoder 3, 2, 1에서 source_feat, source_bwarp_target, z_s 받아서 residual flow랑 residual z 예측
+- Geometry loss 없음
+- Decoder 1는 output residual flow 5개
 
 
 
