@@ -1,83 +1,127 @@
 import os
-import logging
+import time
+import shutil
 import argparse
 
+import numpy as np
+import oyaml as yaml
+from dotmap import DotMap
+
 import torch
+import torch.optim as optim
 import torch.distributed as dist
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 import utils
 import models
+import data as benchmarks
+from utils.logger import Logger
+from evaluate import validate_vimeo90k
+
+
+def get_lr(args, iters):
+    ratio = 0.5 * (1.0 + np.cos(iters / (args.num_epochs * args.iters_per_epoch) * np.pi))
+    lr = (args.start_lr - args.end_lr) * ratio + args.end_lr
+    return lr
+
+
+def set_lr(optimizer, lr):
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
 
 
 def train(args, ddp_model):
     local_rank = args.local_rank
     if local_rank == 0:
-        print(args)
+        os.makedirs(args.log_dir, exist_ok=True)
+        shutil.copy(args.config, os.path.join(args.log_dir, 'config.yaml'))
+        summary_writer = SummaryWriter(args.log_dir)
+        logger = Logger(summary_writer, metric_summary_freq=args.metric_summary_freq)
 
-    dataset_train = Vimeo90K_Train_Dataset(dataset_dir='/home/ltkong/Datasets/Vimeo90K/vimeo_triplet', augment=True)
+    dataset_train = getattr(benchmarks, f'{args.data_name}')(args)
     sampler = DistributedSampler(dataset_train)
     dataloader_train = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.num_workers,
                                   pin_memory=True, drop_last=True, sampler=sampler)
-    args.iters_per_epoch = dataloader_train.__len__()
+
+    args.iters_per_epoch = len(dataloader_train)
     iters = args.resume_epoch * args.iters_per_epoch
 
-    dataset_val = Vimeo90K_Test_Dataset(dataset_dir='/home/ltkong/Datasets/Vimeo90K/vimeo_triplet')
-    dataloader_val = DataLoader(dataset_val, batch_size=16, num_workers=16, pin_memory=True, shuffle=False,
-                                drop_last=True)
+    optimizer = optim.AdamW(ddp_model.parameters(), lr=args.start_lr, weight_decay=0)
 
-    optimizer = optim.AdamW(ddp_model.parameters(), lr=args.lr_start, weight_decay=0)
-
-    time_stamp = time.time()
-    avg_rec = AverageMeter()
-    avg_geo = AverageMeter()
-    avg_dis = AverageMeter()
     best_psnr = 0.0
-
-    for epoch in range(args.resume_epoch, args.epochs):
+    for epoch in range(args.resume_epoch, args.num_epochs):
         sampler.set_epoch(epoch)
-        for i, data in enumerate(dataloader_train):
-            for l in range(len(data)):
-                data[l] = data[l].to(args.device)
-            img0, imgt, img1, flow, embt = data
-
-            data_time_interval = time.time() - time_stamp
+        for i, batch in enumerate(dataloader_train):
+            # Data preparation
+            for k, v in batch.items():
+                batch[k] = v.to(args.device)
             time_stamp = time.time()
 
-            lr = get_lr(args, iters)
-            set_lr(optimizer, lr)
+            # Set lr
+            cur_lr = get_lr(args, iters)
+            set_lr(optimizer, cur_lr)
 
+            # Init gradient
             optimizer.zero_grad()
 
-            imgt_pred, loss_rec, loss_geo, loss_dis = ddp_model(img0, img1, embt, imgt, flow)
+            # Forwarding
+            log_dict, total_loss, metrics = ddp_model(batch)
 
-            loss = loss_rec + loss_geo + loss_dis
-            loss.backward()
+            # Optimize
+            total_loss.backward()
+            torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), args.grad_clip)
             optimizer.step()
 
-            avg_rec.update(loss_rec.cpu().data)
-            avg_geo.update(loss_geo.cpu().data)
-            avg_dis.update(loss_dis.cpu().data)
+            # Logging
             train_time_interval = time.time() - time_stamp
+            if local_rank == 0:
+                metrics.update({
+                    'lr': cur_lr,
+                    'time': train_time_interval,
+                })
+                logger.push(metrics)
 
-            if (iters + 1) % 100 == 0 and local_rank == 0:
-                logger.info(
-                    'epoch:{}/{} iter:{}/{} time:{:.2f}+{:.2f} lr:{:.5e} loss_rec:{:.4e} loss_geo:{:.4e} loss_dis:{:.4e}'.format(
-                        epoch + 1, args.epochs, iters + 1, args.epochs * args.iters_per_epoch, data_time_interval,
-                        train_time_interval, lr, avg_rec.avg, avg_geo.avg, avg_dis.avg))
-                avg_rec.reset()
-                avg_geo.reset()
-                avg_dis.reset()
+                # Image logging
+                if (iters + 1) % args.img_summary_freq == 0:
+                    logger.add_image_summary(batch['x0'], batch['x1'], batch['xt'], log_dict)
+
+                # Save model weighs frequently with optimizer
+                if (iters + 1) % args.save_latest_freq == 0:
+                    checkpoint_path = f'exps/{args.name}/latest.pth'
+                    torch.save({
+                        'model': ddp_model.modules.state_dict(),
+                        'optimizer': optimizer.state_dict(),
+                        'epoch': epoch,
+                        'step': iters + 1,
+                        'best_psnr': best_psnr,
+                    }, checkpoint_path)
 
             iters += 1
-            time_stamp = time.time()
+            break
 
-        if (epoch + 1) % args.eval_interval == 0 and local_rank == 0:
-            psnr = evaluate(args, ddp_model, dataloader_val, epoch, logger)
-            if psnr > best_psnr:
-                best_psnr = psnr
-                torch.save(ddp_model.module.state_dict(), '{}/{}_{}.pth'.format(log_path, args.model_name, 'best'))
-            torch.save(ddp_model.module.state_dict(), '{}/{}_{}.pth'.format(log_path, args.model_name, 'latest'))
+        if (epoch + 1) % args.valid_freq_epoch == 0 and local_rank == 0:
+            val_results = {}
+
+            if 'vimeo90k' in args.val_datasets:
+                results_dict = validate_vimeo90k(args, model)
+                val_results.update(results_dict)
+
+            cur_psnr = val_results[f"{args.save_best_benchmark}_psnr"]
+
+            # Save best model
+            if cur_psnr > best_psnr:
+                best_psnr = cur_psnr
+                checkpoint_path = f'exps/{args.name}/best_{args.save_best_benchmark}.pth'
+                torch.save({
+                    'model': ddp_model.module.state_dict()
+                }, checkpoint_path)
+
+            logger.write_dict(val_results, step=epoch+1)
+            print(f"Epoch {epoch + 1} Validation Done - Best: {best_psnr:.3f}")
+            model.train()
 
         dist.barrier()
 
@@ -86,27 +130,20 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='EuiyeonKim VFIs')
     parser.add_argument('--exp_name', default='debug', type=str)
     parser.add_argument('--config', type=str, default='configs/IFRNet.yaml', help='Configuration YAML path')
+    parser.add_argument('--local_rank', default=0, type=int)
+    parser.add_argument('--world_size', default=1, type=int)
 
-    parser.add_argument('--model_name', default='IFRNet', type=str, choices=['IFRNet'])
-    parser.add_argument('--local_rank', default=-1, type=int)
-    parser.add_argument('--world_size', default=4, type=int)
-    parser.add_argument('--seed', default=1234, type=int)
-
-    parser.add_argument('--epochs', default=300, type=int)
-    parser.add_argument('--eval_interval', default=1, type=int)
-
-    parser.add_argument('--batch_size', default=6, type=int)
-    parser.add_argument('--lr_start', default=1e-4, type=float)
-    parser.add_argument('--lr_end', default=1e-5, type=float)
-
-    parser.add_argument('--resume_epoch', default=0, type=int)
-    parser.add_argument('--resume_path', default=None, type=str)
-
-    # Set Environment - arguments
-    args = parser.parse_args()
+    # Parse Args from Configs
+    parsed = parser.parse_args()
+    with open(parsed.config, 'r') as f:
+        config = yaml.safe_load(f)
+    args = DotMap(config)
+    args.config = parsed.config
+    args.exp_name = parsed.exp_name
+    args.world_size = parsed.world_size
+    args.local_rank = parsed.local_rank
     args.log_dir = os.path.join('exps', args.exp_name)
-    os.makedirs(args.log_dir, exist_ok=True)
-    utils.get_args_from_yaml(args.exp_name, args.config)
+    args.num_workers = args.batch_size
 
     # Set Environment - distributed training
     dist.init_process_group(backend='nccl', world_size=args.world_size)
@@ -116,6 +153,7 @@ if __name__ == '__main__':
     # Set Environment - seed & optimization
     utils.set_seed(seed=args.seed)
     torch.backends.cudnn.benchmark = True
+    torch.autograd.set_detect_anomaly(True)
 
     # Build Model
     model = getattr(models, f'{args.model_name}')(args).to(args.device)

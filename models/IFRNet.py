@@ -201,58 +201,84 @@ class IFRNet(nn.Module):
         imgt_pred = torch.clamp(imgt_pred, 0, 1)
         return imgt_pred
 
-    def forward(self, img0, img1, embt, imgt, flow=None):
-        mean_ = torch.cat([img0, img1], 2).mean(1, keepdim=True).mean(2, keepdim=True).mean(3, keepdim=True)
-        img0 = img0 - mean_
-        img1 = img1 - mean_
-        imgt_ = imgt - mean_
+    def forward(self, inp_dict):
+        x0, x1, xt, t = inp_dict['x0'], inp_dict['x1'], inp_dict['xt'], inp_dict['t']
 
-        f0_1, f0_2, f0_3, f0_4 = self.encoder(img0)
-        f1_1, f1_2, f1_3, f1_4 = self.encoder(img1)
-        ft_1, ft_2, ft_3, ft_4 = self.encoder(imgt_)
+        # Preprocess data
+        t = t.unsqueeze(-1).unsqueeze(-1)
+        x0, x1, xt = x0 / 255., x1 / 255., xt / 255
+        mean_ = torch.cat((x0, x1), dim=2).mean(1, keepdim=True).mean(2, keepdim=True).mean(3, keepdim=True)
+        x0, x1 = x0 - mean_, x1 - mean_
 
-        out4 = self.decoder4(f0_4, f1_4, embt)
-        up_flow0_4 = out4[:, 0:2]
-        up_flow1_4 = out4[:, 2:4]
+        # Generate multi-level features
+        f0_1, f0_2, f0_3, f0_4 = self.encoder(x0)
+        f1_1, f1_2, f1_3, f1_4 = self.encoder(x1)
+
+        # Process decoder4 output
+        out4 = self.decoder4(f0_4, f1_4, t)
+        up_flow0_4, up_flow1_4 = out4[:, 0:2], out4[:, 2:4]
         ft_3_ = out4[:, 4:]
 
+        # Process decoder3 output
         out3 = self.decoder3(ft_3_, f0_3, f1_3, up_flow0_4, up_flow1_4)
         up_flow0_3 = out3[:, 0:2] + 2.0 * resize(up_flow0_4, scale_factor=2.0)
         up_flow1_3 = out3[:, 2:4] + 2.0 * resize(up_flow1_4, scale_factor=2.0)
         ft_2_ = out3[:, 4:]
 
+        # Process decoder2 output
         out2 = self.decoder2(ft_2_, f0_2, f1_2, up_flow0_3, up_flow1_3)
         up_flow0_2 = out2[:, 0:2] + 2.0 * resize(up_flow0_3, scale_factor=2.0)
         up_flow1_2 = out2[:, 2:4] + 2.0 * resize(up_flow1_3, scale_factor=2.0)
         ft_1_ = out2[:, 4:]
 
+        # Process decoder1 output
         out1 = self.decoder1(ft_1_, f0_1, f1_1, up_flow0_2, up_flow1_2)
         up_flow0_1 = out1[:, 0:2] + 2.0 * resize(up_flow0_2, scale_factor=2.0)
         up_flow1_1 = out1[:, 2:4] + 2.0 * resize(up_flow1_2, scale_factor=2.0)
         up_mask_1 = torch.sigmoid(out1[:, 4:5])
         up_res_1 = out1[:, 5:]
 
-        img0_warp = warp(img0, up_flow0_1)
-        img1_warp = warp(img1, up_flow1_1)
-        imgt_merge = up_mask_1 * img0_warp + (1 - up_mask_1) * img1_warp + mean_
+        # Final frame prediction
+        x0_warp = warp(x0, up_flow0_1)
+        x1_warp = warp(x1, up_flow1_1)
+        imgt_merge = up_mask_1 * x0_warp + (1 - up_mask_1) * x1_warp + mean_
         imgt_pred = imgt_merge + up_res_1
         imgt_pred = torch.clamp(imgt_pred, 0, 1)
 
-        loss_rec = self.l1_loss(imgt_pred - imgt) + self.tr_loss(imgt_pred, imgt)
-        loss_geo = 0.01 * (self.gc_loss(ft_1_, ft_1) + self.gc_loss(ft_2_, ft_2) + self.gc_loss(ft_3_, ft_3))
-        if flow is not None:
-            robust_weight0 = get_robust_weight(up_flow0_1, flow[:, 0:2], beta=0.3)
-            robust_weight1 = get_robust_weight(up_flow1_1, flow[:, 2:4], beta=0.3)
-            loss_dis = 0.01 * (self.rb_loss(2.0 * resize(up_flow0_2, 2.0) - flow[:, 0:2],
-                                            weight=robust_weight0) + self.rb_loss(
-                2.0 * resize(up_flow1_2, 2.0) - flow[:, 2:4], weight=robust_weight1))
-            loss_dis += 0.01 * (self.rb_loss(4.0 * resize(up_flow0_3, 4.0) - flow[:, 0:2],
-                                             weight=robust_weight0) + self.rb_loss(
-                4.0 * resize(up_flow1_3, 4.0) - flow[:, 2:4], weight=robust_weight1))
-            loss_dis += 0.01 * (self.rb_loss(8.0 * resize(up_flow0_4, 8.0) - flow[:, 0:2],
-                                             weight=robust_weight0) + self.rb_loss(
-                8.0 * resize(up_flow1_4, 8.0) - flow[:, 2:4], weight=robust_weight1))
-        else:
-            loss_dis = 0.00 * loss_geo
+        if not self.training:
+            return imgt_pred
 
-        return imgt_pred, loss_rec, loss_geo, loss_dis
+        # Calculate loss on training phase
+        f01, f10 = inp_dict['f01'], inp_dict['f10']
+        l1_loss = self.l1_loss(imgt_pred - xt)
+        census_loss = self.tr_loss(imgt_pred, xt)
+
+        xt_ = xt - mean_
+        ft_1, ft_2, ft_3, ft_4 = self.encoder(xt_)
+        geo_loss = 0.01 * (self.gc_loss(ft_1_, ft_1) + self.gc_loss(ft_2_, ft_2) + self.gc_loss(ft_3_, ft_3))
+
+        robust_weight0 = get_robust_weight(up_flow0_1, f01, beta=0.3)
+        robust_weight1 = get_robust_weight(up_flow1_1, f10, beta=0.3)
+        distill_loss = 0.01 * (self.rb_loss(2.0 * resize(up_flow0_2, 2.0) - f01, weight=robust_weight0) + \
+                               self.rb_loss(2.0 * resize(up_flow1_2, 2.0) - f10, weight=robust_weight1) + \
+                               self.rb_loss(4.0 * resize(up_flow0_3, 4.0) - f01, weight=robust_weight0) + \
+                               self.rb_loss(4.0 * resize(up_flow1_3, 4.0) - f10, weight=robust_weight1) + \
+                               self.rb_loss(8.0 * resize(up_flow0_4, 8.0) - f01, weight=robust_weight0) + \
+                               self.rb_loss(8.0 * resize(up_flow1_4, 8.0) - f10, weight=robust_weight1))
+        total_loss = l1_loss + census_loss + geo_loss + distill_loss
+
+        return {
+            'frame_preds': [imgt_pred],
+            'xt_warp_x0': x0_warp + mean_,
+            'xt_warp_x1': x1_warp + mean_,
+            'x0_mask': up_mask_1,
+            'f01': up_flow0_1,
+            'f10': up_flow1_1,
+        }, total_loss, {
+            'total_loss': total_loss.item(),
+            'l1_loss': l1_loss.item(),
+            'census_loss': census_loss.item(),
+            'flow_loss': distill_loss.item(),
+            'geometry_loss': geo_loss.item(),
+        }
+
