@@ -92,7 +92,7 @@ def train(args, ddp_model):
                 if (iters + 1) % args.save_latest_freq == 0:
                     checkpoint_path = f'exps/{args.name}/latest.pth'
                     torch.save({
-                        'model': ddp_model.modules.state_dict(),
+                        'model': ddp_model.module.state_dict(),
                         'optimizer': optimizer.state_dict(),
                         'epoch': epoch,
                         'step': iters + 1,
