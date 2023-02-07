@@ -40,6 +40,9 @@ def train(args, ddp_model):
         shutil.copy(args.config, os.path.join(args.log_dir, 'config.yaml'))
         summary_writer = SummaryWriter(args.log_dir)
         logger = Logger(summary_writer, metric_summary_freq=args.metric_summary_freq)
+        print(ddp_model.module)
+        num_params = sum(p.numel() for p in ddp_model.parameters())
+        print('Number of params:', num_params)
 
     dataset_train = getattr(benchmarks, f'{args.data_name}')(args)
     sampler = DistributedSampler(dataset_train)
@@ -90,7 +93,7 @@ def train(args, ddp_model):
 
                 # Save model weighs frequently with optimizer
                 if (iters + 1) % args.save_latest_freq == 0:
-                    checkpoint_path = f'exps/{args.name}/latest.pth'
+                    checkpoint_path = f'{args.log_dir}/latest.pth'
                     torch.save({
                         'model': ddp_model.module.state_dict(),
                         'optimizer': optimizer.state_dict(),
@@ -113,7 +116,7 @@ def train(args, ddp_model):
             # Save best model
             if cur_psnr > best_psnr:
                 best_psnr = cur_psnr
-                checkpoint_path = f'exps/{args.name}/best_{args.save_best_benchmark}.pth'
+                checkpoint_path = f'{args.log_dir}/best_{args.save_best_benchmark}.pth'
                 torch.save({
                     'model': ddp_model.module.state_dict()
                 }, checkpoint_path)
@@ -150,9 +153,8 @@ if __name__ == '__main__':
     args.device = torch.device('cuda', args.local_rank)
 
     # Set Environment - seed & optimization
-    # utils.set_seed(seed=args.seed)
+    utils.set_seed(seed=args.seed)
     torch.backends.cudnn.benchmark = True
-    torch.autograd.set_detect_anomaly(True)
 
     # Build Model
     model = getattr(models, f'{args.model_name}')(args).to(args.device)
