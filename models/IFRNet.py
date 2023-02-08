@@ -1,9 +1,11 @@
 from modules.losses import *
 from modules.warp import bwarp as warp
+from utils.flow_viz import flow_tensor_to_np
 
 
 def resize(x, scale_factor):
-    return F.interpolate(x, scale_factor=scale_factor, mode="bilinear", align_corners=False)
+    return F.interpolate(x, scale_factor=scale_factor, recompute_scale_factor=False,
+                         mode="bilinear", align_corners=False)
 
 
 def convrelu(in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, bias=True):
@@ -156,6 +158,31 @@ class IFRNet(nn.Module):
         self.tr_loss = Ternary(7)
         self.rb_loss = Charbonnier_Ada()
         self.gc_loss = Geometry(3)
+
+    def get_log_dict(self, inp_dict, results_dict):
+        x0, x1, xt = inp_dict['x0'], inp_dict['x1'], inp_dict['xt']
+        x0_01, x1_01, xt_01 = x0[0] / 255., x1[0]/255., xt[0] / 255.
+        pred_last = results_dict['frame_preds'][-1][0][None]
+
+        fwd_flow_viz = flow_tensor_to_np(results_dict['f01'][0]) / 255.
+        bwd_flow_viz = flow_tensor_to_np(results_dict['f10'][0]) / 255.
+        viz_flow = torch.cat((x0_01, torch.from_numpy(fwd_flow_viz).cuda(),
+                              torch.from_numpy(bwd_flow_viz).cuda(), x1_01), dim=-1)
+
+        xt_warp_x0_01 = results_dict['xt_warp_x0'][0]
+        xt_warp_x1_01 = results_dict['xt_warp_x1'][0]
+        x0_mask = results_dict['x0_mask'][0].repeat(3, 1, 1).unsqueeze(0)
+        process_concat = torch.cat((xt_warp_x0_01[None], x0_mask, xt_warp_x1_01[None]), dim=-1)
+
+        half = (x0_01 + x1_01) / 2
+        err_map = (xt_01 - pred_last).abs()
+        pred_concat = torch.cat((half[None], pred_last, xt_01[None], err_map), dim=-1)
+
+        return {
+            'flow': viz_flow,
+            'process': process_concat[0],
+            'pred': pred_concat[0],
+        }
 
     def forward(self, inp_dict):
         x0, x1, xt, t = inp_dict['x0'], inp_dict['x1'], inp_dict['xt'], inp_dict['t']

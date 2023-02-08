@@ -45,24 +45,29 @@ class Logger:
     def close(self):
         self.summary_writer.close()
 
-    def add_image_summary(self, x0, x1, xt, results_dict):
-        x0_01, x1_01, xt_01 = x0[0] / 255., x1[0]/255., xt[0] / 255.
-        pred_last = results_dict['frame_preds'][-1][0][None]
-
-        fwd_flow_viz = flow_tensor_to_np(results_dict['f01'][0]) / 255.
-        bwd_flow_viz = flow_tensor_to_np(results_dict['f10'][0]) / 255.
-        viz_flow = torch.cat((x0_01, torch.from_numpy(fwd_flow_viz).cuda(),
-                              torch.from_numpy(bwd_flow_viz).cuda(), x1_01), dim=-1)
-        self.summary_writer.add_image('flow', viz_flow, self.total_steps)
-
-        xt_warp_x0_01 = results_dict['xt_warp_x0'][0]
-        xt_warp_x1_01 = results_dict['xt_warp_x1'][0]
-        x0_mask = results_dict['x0_mask'][0].repeat(3, 1, 1).unsqueeze(0)
-        process_concat = torch.cat((xt_warp_x0_01[None], x0_mask, xt_warp_x1_01[None]), dim=-1)
-        self.summary_writer.add_image('process', process_concat[0], self.total_steps)
-
-        half = (x0_01 + x1_01) / 2
-        err_map = (xt_01 - pred_last).abs()
-        pred_concat = torch.cat((half[None], pred_last, xt_01[None], err_map), dim=-1)
-        self.summary_writer.add_image('pred', pred_concat[0], self.total_steps)
+    def add_image_summary(self, img_dict):
+        for k, v in img_dict.items():
+            self.summary_writer.add_image(k, v, self.total_steps)
         self.summary_writer.flush()
+
+    # def add_image_summary(self, x0, x1, xt, results_dict):
+    #     x0_01, x1_01, xt_01 = x0[0] / 255., x1[0]/255., xt[0] / 255.
+    #     pred_last = results_dict['frame_preds'][-1][0][None]
+    #
+    #     fwd_flow_viz = flow_tensor_to_np(results_dict['f01'][0]) / 255.
+    #     bwd_flow_viz = flow_tensor_to_np(results_dict['f10'][0]) / 255.
+    #     viz_flow = torch.cat((x0_01, torch.from_numpy(fwd_flow_viz).cuda(),
+    #                           torch.from_numpy(bwd_flow_viz).cuda(), x1_01), dim=-1)
+    #     self.summary_writer.add_image('flow', viz_flow, self.total_steps)
+    #
+    #     xt_warp_x0_01 = results_dict['xt_warp_x0'][0]
+    #     xt_warp_x1_01 = results_dict['xt_warp_x1'][0]
+    #     x0_mask = results_dict['x0_mask'][0].repeat(3, 1, 1).unsqueeze(0)
+    #     process_concat = torch.cat((xt_warp_x0_01[None], x0_mask, xt_warp_x1_01[None]), dim=-1)
+    #     self.summary_writer.add_image('process', process_concat[0], self.total_steps)
+    #
+    #     half = (x0_01 + x1_01) / 2
+    #     err_map = (xt_01 - pred_last).abs()
+    #     pred_concat = torch.cat((half[None], pred_last, xt_01[None], err_map), dim=-1)
+    #     self.summary_writer.add_image('pred', pred_concat[0], self.total_steps)
+    #     self.summary_writer.flush()

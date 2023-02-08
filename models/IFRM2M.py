@@ -1,9 +1,37 @@
 import torch
 import torch.nn as nn
 
+from utils.flow_viz import flow_tensor_to_np
 from modules.warp import bwarp, fwarp_mframes
 from models.IFRNet import Encoder, ResBlock, convrelu, resize
 from modules.losses import Ternary, Geometry, Charbonnier_Ada, Charbonnier_L1, get_robust_weight
+
+
+def img_logger(inp_dict, results_dict):
+    x0, x1, xt = inp_dict['x0'], inp_dict['x1'], inp_dict['xt']
+    x0_01, x1_01, xt_01 = x0[0] / 255., x1[0] / 255., xt[0] / 255.
+    pred_last = results_dict['frame_preds'][-1][0][None]
+
+    fwd_flow_viz = flow_tensor_to_np(results_dict['f01'][0]) / 255.
+    bwd_flow_viz = flow_tensor_to_np(results_dict['f10'][0]) / 255.
+    viz_flow = torch.cat((x0_01, torch.from_numpy(fwd_flow_viz).cuda(),
+                          torch.from_numpy(bwd_flow_viz).cuda(), x1_01), dim=-1)
+
+    x0_mask = results_dict['x0_mask'][0]
+    x0_mask = (x0_mask / torch.max(x0_mask)).repeat(3, 1, 1).unsqueeze(0)
+    x1_mask = results_dict['x1_mask'][0]
+    x1_mask = (x1_mask / torch.max(x1_mask)).repeat(3, 1, 1).unsqueeze(0)
+    process_concat = torch.cat((x0_01 * 0.3 + x0_mask * 0.7, x0_mask, x1_mask, x1_01 * 0.3 + x1_mask * 0.7), dim=-1)
+
+    half = (x0_01 + x1_01) / 2
+    err_map = (xt_01 - pred_last).abs()
+    pred_concat = torch.cat((half[None], pred_last, xt_01[None], err_map), dim=-1)
+
+    return {
+        'flow': viz_flow,
+        'process': process_concat[0],
+        'pred': pred_concat[0],
+    }
 
 
 class Decoder4v1(nn.Module):
@@ -99,13 +127,16 @@ class IFRM2Mv1(nn.Module):
         self.decoder1 = Decoder1v1(nc=32, n_branch=self.n_branch)
 
         self.tr_loss = Ternary(7)
-        self.gc_loss = Geometry(3)
         self.l1_loss = Charbonnier_L1()
         self.rb_loss = Charbonnier_Ada()
 
     def repeat_for_branch(self, tensor):
         _b, _c, _h, _w = tensor.shape
         return tensor.repeat(1, self.n_branch, 1, 1).view(_b, self.n_branch, _c, _h, _w).permute(1, 0, 2, 3, 4)
+
+    @staticmethod
+    def get_log_dict(inp_dict, results_dict):
+        return img_logger(inp_dict, results_dict)
 
     def forward(self, inp_dict):
         '''
@@ -175,9 +206,8 @@ class IFRM2Mv1(nn.Module):
 
         return {
             'frame_preds': [imgt_pred],
-            'xt_warp_x0': for_blank + mean_,
-            'xt_warp_x1': pred_xt + mean_,
             'x0_mask': z0_1,
+            'x1_mask': z1_1,
             'f01': mu_f01_1,
             'f10': mu_f10_1,
         }, total_loss, {
@@ -188,3 +218,39 @@ class IFRM2Mv1(nn.Module):
             'geometry_loss': 0.0,
             'alpha': self.alpha[0].item()
         }
+
+
+class IFRM2Mv2(nn.Module):
+    def __init__(self, args):
+        super(IFRM2Mv2, self).__init__()
+        self.args = args
+        self.n_branch = args.m2m_branch
+        self.distill_lambda = args.distill_lambda
+        self.alpha = torch.nn.Parameter(10.0 * torch.ones(1, 1, 1, 1))
+
+        self.encoder = Encoder()
+        self.decoder4 = Decoder4v1()
+
+        self.tr_loss = Ternary(7)
+        self.gc_loss = Geometry(3)
+        self.l1_loss = Charbonnier_L1()
+        self.rb_loss = Charbonnier_Ada()
+
+    @staticmethod
+    def get_log_dict(inp_dict, results_dict):
+        return img_logger(inp_dict, results_dict)
+
+    def forward(self, inp_dict):
+        x0, x1, xt, t = inp_dict['x0'], inp_dict['x1'], inp_dict['xt'], inp_dict['t']
+        b, _, h, w = x0.shape
+
+        # Preprocess data
+        x0, x1, xt = x0 / 255., x1 / 255., xt / 255
+        mean_ = torch.cat((x0, x1), dim=2).mean(1, keepdim=True).mean(2, keepdim=True).mean(3, keepdim=True)
+        x0, x1 = x0 - mean_, x1 - mean_
+
+        # Generate multi-level features
+        feat0_1, feat0_2, feat0_3, feat0_4 = self.encoder(x0)
+        feat1_1, feat1_2, feat1_3, feat1_4 = self.encoder(x1)
+
+

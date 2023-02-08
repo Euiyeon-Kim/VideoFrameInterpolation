@@ -1,8 +1,8 @@
-NUM_GPUS=2
+NUM_GPUS=1
 
 python -m torch.distributed.launch \
 --nproc_per_node=${NUM_GPUS} \
 train.py \
---exp_name IFRM2Mv1_nB5_noGeo \
---config configs/IFRM2M.yaml \
+--exp_name debug \
+--config configs/GMM2M.yaml \
 --world_size ${NUM_GPUS}

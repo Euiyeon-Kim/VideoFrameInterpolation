@@ -89,7 +89,8 @@ def train(args, ddp_model):
 
                 # Image logging
                 if (iters + 1) % args.img_summary_freq == 0:
-                    logger.add_image_summary(batch['x0'], batch['x1'], batch['xt'], log_dict)
+                    img_dict = ddp_model.module.get_log_dict(batch, log_dict)
+                    logger.add_image_summary(img_dict)
 
                 # Save model weighs frequently with optimizer
                 if (iters + 1) % args.save_latest_freq == 0:
@@ -158,6 +159,13 @@ if __name__ == '__main__':
 
     # Build Model
     model = getattr(models, f'{args.model_name}')(args).to(args.device)
+
+    # Load state dict
+    if args.load_gmflow:
+        print(f"Load GMFlow weight from {args.load_gmflow}")
+        checkpoint = torch.load(args.load_gmflow, map_location='cpu')['model']
+        model.load_state_dict(checkpoint, strict=False)
+
     ddp_model = DDP(model, device_ids=[args.local_rank], output_device=args.local_rank)
 
     train(args, ddp_model)
