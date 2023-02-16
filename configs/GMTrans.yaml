@@ -2,8 +2,7 @@ seed: 806
 
 # Model
 model_name: GMTransv1
-m2m_branch: 5
-load_gmflow: trained/gmflow_mix.pth
+#load_gmflow: trained/gmflow_mix.pth
 flow_dir: gmflow_scale2_refine6
 distill_bwd: False                           # True: learn ft0  False: learn f01
 

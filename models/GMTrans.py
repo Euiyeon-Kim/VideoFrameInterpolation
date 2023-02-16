@@ -24,11 +24,16 @@ class Encoder(nn.Module):
             convrelu(48, 96, 3, 2, 1),
             convrelu(96, 96, 3, 1, 1)
         )
+        self.pyramid3 = nn.Sequential(
+            convrelu(96, 128, 3, 2, 1),
+            convrelu(128, 128, 3, 1, 1)
+        )
 
     def forward(self, img):
         f1 = self.pyramid1(img)
         f2 = self.pyramid2(f1)
-        return f1, f2
+        f3 = self.pyramid3(f2)
+        return f1, f2, f3
 
 
 class WindowAttention(nn.Module):
@@ -305,7 +310,7 @@ class GMTransv1(nn.Module):
         self.alpha = torch.nn.Parameter(10.0 * torch.ones(1, 1, 1, 1))
 
         self.nf = 128
-        self.backbone = CNNEncoder(output_dim=self.nf, num_output_scales=1)
+        # self.backbone = CNNEncoder(output_dim=self.nf, num_output_scales=1)
         self.transformer = FeatureTransformer(num_layers=6, d_model=self.nf, nhead=1, ffn_dim_expansion=4)
 
         self.encoder = Encoder()
@@ -314,7 +319,6 @@ class GMTransv1(nn.Module):
         self.decoder2 = Decoder2(inp_dim=48, depth=6, num_heads=6, window_size=4)
         self.decoder1 = nn.Sequential(
             nn.Conv2d(48, 3 * 4, 3, 1, 1, 1, 1, bias=True),
-            nn.Sigmoid(),
             nn.PixelShuffle(2)
         )
 
@@ -327,6 +331,8 @@ class GMTransv1(nn.Module):
         x0, x1, xt = inp_dict['x0'], inp_dict['x1'], inp_dict['xt']
         x0_01, x1_01, xt_01 = x0[0] / 255., x1[0] / 255., xt[0] / 255.
         pred_last = results_dict['frame_preds'][-1][0][None]
+        residual = torch.clamp(results_dict['frame_preds'][1][0][None], 0, 1)
+        base = torch.clamp(results_dict['frame_preds'][0][0][None], 0, 1)
 
         fwd_flow_viz = flow_tensor_to_np(results_dict['f01'][0]) / 255.
         bwd_flow_viz = flow_tensor_to_np(results_dict['f10'][0]) / 255.
@@ -337,9 +343,11 @@ class GMTransv1(nn.Module):
         err_map = (xt_01 - pred_last).abs()
         pred_concat = torch.cat((half[None], pred_last, xt_01[None], err_map), dim=-1)
 
+        process_concat = torch.cat((base, residual, pred_last, xt_01[None]), dim=-1)
         return {
             'flow': viz_flow,
             'pred': pred_concat[0],
+            'process': process_concat[0],
         }
 
     def forward(self, inp_dict):
@@ -347,14 +355,16 @@ class GMTransv1(nn.Module):
 
         # Preprocess data
         t = t.unsqueeze(-1).unsqueeze(-1)
-        x0, x1 = normalize_imgnet(x0), normalize_imgnet(x1)
-        # x0, x1 = x0 / 255., x1 / 255.
-        # mean_ = torch.cat((x0, x1), dim=2).mean(1, keepdim=True).mean(2, keepdim=True).mean(3, keepdim=True)
-        # x0, x1 = x0 - mean_, x1 - mean_
+        # x0, x1 = normalize_imgnet(x0), normalize_imgnet(x1)
+        x0, x1 = x0 / 255., x1 / 255.
+        mean_ = torch.cat((x0, x1), dim=2).mean(1, keepdim=True).mean(2, keepdim=True).mean(3, keepdim=True)
+        x0, x1 = x0 - mean_, x1 - mean_
 
         # Encode CNN feature
-        feat0_3 = self.backbone(x0)
-        feat1_3 = self.backbone(x1)
+        feat0_1, feat0_2, feat0_3 = self.encoder(x0)
+        feat1_1, feat1_2, feat1_3 = self.encoder(x1)
+        # feat0_3 = self.backbone(x0)
+        # feat1_3 = self.backbone(x1)
         b, _, fh, fw = feat0_3.shape
 
         # Attended feature
@@ -373,9 +383,6 @@ class GMTransv1(nn.Module):
                                                                        feat1_3, f10_4 * (1 - t), (1 - t),
                                                                        z0_4, z1_4)
 
-        feat0_1, feat0_2 = self.encoder(x0)
-        feat1_1, feat1_2 = self.encoder(x1)
-
         # Make feat_t_3
         pred_feat_t_3 = self.decoder4(pred_feat_t_4)
         pred_feat_t_2 = self.decoder3(pred_feat_t_3, feat0_2, feat1_2)
@@ -387,9 +394,8 @@ class GMTransv1(nn.Module):
         z0 = resize(z0_4, 8.)
         z1 = resize(z1_4, 8.)
         img_t_base, _ = fwarp_using_two_frames(x0, pred_f01 * t, t,
-                                               x1, pred_f10 * (1 - t), (1 - t),
-                                               z0, z1)
-        imgt_pred = torch.clamp(denormalize_imgnet_to01(img_t_base + residual), 0, 1)
+                                               x1, pred_f10 * (1 - t), (1 - t), z0, z1)
+        imgt_pred = torch.clamp(denormalize_imgnet_to01(img_t_base + residual + mean_), 0, 1)
 
         if not self.training:
             return imgt_pred
@@ -397,14 +403,15 @@ class GMTransv1(nn.Module):
         # Calculate loss on training phase
         f01, f10 = inp_dict['f01'], inp_dict['f10']
         xt = inp_dict['xt'] / 255
-        l1_loss = self.l1_loss(imgt_pred, xt)
-        census_loss = self.tr_loss(imgt_pred, xt)
+        img_base = torch.clamp(img_t_base + mean_, 0, 1)
+        l1_loss = self.l1_loss(imgt_pred - xt) + self.l1_loss(img_base - xt)
+        census_loss = self.tr_loss(imgt_pred, xt) + self.tr_loss(img_base, xt)
 
         distill_loss = 0.01 * (self.mse_loss(pred_f01, f01) + self.mse_loss(pred_f10, f10))
         total_loss = l1_loss + census_loss + distill_loss
 
         return {
-            'frame_preds': [imgt_pred],
+            'frame_preds': [img_t_base + mean_, residual + mean_, imgt_pred],
             'f01': pred_f01,
             'f10': pred_f10,
         }, total_loss, {

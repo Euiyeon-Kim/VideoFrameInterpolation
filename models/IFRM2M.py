@@ -190,7 +190,7 @@ class IFRM2Mv1(nn.Module):
 
         # Calculate loss
         f01, f10 = inp_dict['f01'], inp_dict['f10']
-        l1_loss = self.l1_loss(imgt_pred - xt)
+        l1_loss = self.l1_loss(imgt_pred, xt)
         census_loss = self.tr_loss(imgt_pred, xt)
 
         mu_f01_1, mu_f10_1 = torch.mean(f01_1, 0), torch.mean(f10_1, 0)
