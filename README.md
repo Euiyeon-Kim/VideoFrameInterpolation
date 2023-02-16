@@ -1,5 +1,9 @@
 # VideoFrameInterpolation
 
+### To Try
+- [ ] m2m Flow variance 가 낮아지게 학습해보기
+- [ ] distillation 할 때 epe기준 말고 variance 기준 weighting (modify get robust weight)
+
 ## Models
 
 ---

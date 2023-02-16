@@ -4,5 +4,5 @@ python -m torch.distributed.launch \
 --nproc_per_node=${NUM_GPUS} \
 train.py \
 --exp_name debug \
---config configs/GMM2M.yaml \
+--config configs/GMTrans.yaml \
 --world_size ${NUM_GPUS}

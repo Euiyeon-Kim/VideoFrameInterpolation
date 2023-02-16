@@ -335,13 +335,10 @@ class TransformerLayer(nn.Module):
         # source, target: [B, L, C]
         query, key, value = source, target, target
 
-        # for stereo: 2d attn in self-attn, 1d attn in cross-attn
-        is_self_attn = (query - key).abs().max() < 1e-6
-
         # single-head attention
-        query = self.q_proj(query)  # [B, L, C]
-        key = self.k_proj(key)  # [B, L, C]
-        value = self.v_proj(value)  # [B, L, C]
+        query = self.q_proj(query)      # [B, L, C]
+        key = self.k_proj(key)          # [B, L, C]
+        value = self.v_proj(value)      # [B, L, C]
 
         if attn_type == 'swin' and attn_num_splits > 1:  # self, cross-attn: both swin 2d
             if self.nhead > 1:
@@ -464,12 +461,7 @@ def generate_shift_window_attn_mask(input_resolution, window_size_h, window_size
 
 
 class FeatureTransformer(nn.Module):
-    def __init__(self,
-                 num_layers=6,
-                 d_model=128,
-                 nhead=1,
-                 ffn_dim_expansion=4,
-                 ):
+    def __init__(self, num_layers=6, d_model=128, nhead=1, ffn_dim_expansion=4):
         super(FeatureTransformer, self).__init__()
 
         self.d_model = d_model
@@ -479,7 +471,8 @@ class FeatureTransformer(nn.Module):
             TransformerBlock(d_model=d_model,
                              nhead=nhead,
                              ffn_dim_expansion=ffn_dim_expansion)
-            for i in range(num_layers)])
+            for i in range(num_layers)]
+        )
 
         for p in self.parameters():
             if p.dim() > 1:
@@ -703,7 +696,8 @@ class Encoder(nn.Module):
 
 
 def resize(x, scale_factor):
-    return F.interpolate(x, scale_factor=scale_factor, recompute_scale_factor=False, mode="bilinear", align_corners=True)
+    return F.interpolate(x, scale_factor=scale_factor,
+                         recompute_scale_factor=False, mode="bilinear", align_corners=True)
 
 
 class GMM2Mv1(nn.Module):
