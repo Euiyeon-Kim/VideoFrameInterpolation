@@ -15,6 +15,50 @@ def bwarp(img, flow):
     return output
 
 
+def fwarp(tenIn:torch.Tensor, tenFlow:torch.Tensor, tenMetric:torch.Tensor, strMode:str='soft'):
+    assert(strMode.split('-')[0] in ['sum', 'avg', 'linear', 'soft'])
+
+    if strMode == 'sum': assert(tenMetric is None)
+    if strMode == 'avg': assert(tenMetric is None)
+    if strMode.split('-')[0] == 'linear': assert(tenMetric is not None)
+    if strMode.split('-')[0] == 'soft': assert(tenMetric is not None)
+
+    if strMode == 'avg':
+        tenIn = torch.cat([tenIn, tenIn.new_ones([tenIn.shape[0], 1, tenIn.shape[2], tenIn.shape[3]])], 1)
+
+    elif strMode.split('-')[0] == 'linear':
+        tenIn = torch.cat([tenIn * tenMetric, tenMetric], 1)
+
+    elif strMode.split('-')[0] == 'soft':
+        tenIn = torch.cat([tenIn * tenMetric.exp(), tenMetric.exp()], 1)
+
+    # end
+
+    tenOut = softsplat_func.apply(tenIn, tenFlow)
+
+    if strMode.split('-')[0] in ['avg', 'linear', 'soft']:
+        tenNormalize = tenOut[:, -1:, :, :]
+
+        if len(strMode.split('-')) == 1:
+            tenNormalize = tenNormalize + 0.0000001
+
+        elif strMode.split('-')[1] == 'addeps':
+            tenNormalize = tenNormalize + 0.0000001
+
+        elif strMode.split('-')[1] == 'zeroeps':
+            tenNormalize[tenNormalize == 0.0] = 1.0
+
+        elif strMode.split('-')[1] == 'clipeps':
+            tenNormalize = tenNormalize.clip(0.0000001, None)
+
+        # end
+
+        tenOut = tenOut[:, :-1, :, :] / tenNormalize
+    # end
+
+    return tenOut
+
+
 def fwarp_using_two_frames(tenIn1, tenFlow1, t1, tenIn2, tenFlow2, t2, tenMetric1=None, tenMetric2=None):
     def one_fdir(tenIn, tenFlow, td, tenMetric):
         tenIn = torch.cat([tenIn * td * (tenMetric).clip(-20.0, 20.0).exp(),

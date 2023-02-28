@@ -1,0 +1,31 @@
+seed: 806
+
+# Model
+model_name: RSTTv1
+flow_dir: gmflow_scale2_refine6
+distill_bwd: False                           # True: learn ft0  False: learn f01
+
+# Data
+data_name: Vimeo90K                          # Vimeo90K, X4K
+root: datasets/vimeo_triplet                 # vimeo_triplet, X4K1000FPS
+crop_h: 224
+crop_w: 224
+batch_size: 12
+num_workers: 8
+val_datasets:
+  - vimeo90k
+save_best_benchmark: vimeo90k
+
+# Training
+start_lr: 1.0e-4
+end_lr: 1.0e-5
+resume_epoch: 0
+num_epochs: 500
+grad_clip: 1.0
+distill_lambda: 0.1
+
+# Logging
+img_summary_freq: 1000
+metric_summary_freq: 100
+save_latest_freq: 2000
+valid_freq_epoch: 1
