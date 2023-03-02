@@ -140,10 +140,12 @@ class RSTTv1(nn.Module):
         x0_01, x1_01, xt_01 = x0[0] / 255., x1[0]/255., xt[0] / 255.
         pred_last = results_dict['frame_preds'][-1][0][None]
 
+        pseudo_gt_fwd_flow_viz = flow_tensor_to_np(inp_dict['f01'][0]) / 255.
+        pseudo_gt_bwd_flow_viz = flow_tensor_to_np(inp_dict['f10'][0]) / 255.
         fwd_flow_viz = flow_tensor_to_np(results_dict['f01'][0]) / 255.
         bwd_flow_viz = flow_tensor_to_np(results_dict['f10'][0]) / 255.
-        viz_flow = torch.cat((x0_01, torch.from_numpy(fwd_flow_viz).cuda(),
-                              torch.from_numpy(bwd_flow_viz).cuda(), x1_01), dim=-1)
+        viz_flow = torch.cat((torch.from_numpy(pseudo_gt_fwd_flow_viz).cuda(), torch.from_numpy(fwd_flow_viz).cuda(),
+                              torch.from_numpy(bwd_flow_viz).cuda(), torch.from_numpy(pseudo_gt_bwd_flow_viz).cuda()), dim=-1)
         half = (x0_01 + x1_01) / 2
         err_map = (xt_01 - pred_last).abs()
         pred_concat = torch.cat((half[None], pred_last, xt_01[None], err_map), dim=-1)
