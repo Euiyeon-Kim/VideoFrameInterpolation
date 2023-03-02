@@ -124,12 +124,12 @@ class RSTTv1(nn.Module):
             'origin_preds': [x0_pred, x1_pred],
         }, total_loss, {
             'total_loss': total_loss.item(),
-            'l1_loss': l1_loss.item(),
-            'l1_inter': l1_loss_inter.item(),
-            'l1_origin': l1_loss_inter.item(),
-            'census_loss': census_loss.item(),
-            'census_inter': census_loss_inter.item(),
+            'l1_loss': l1_loss_inter.item(),
+            'l1_origin': l1_loss_origin.item(),
+            'l1_both': l1_loss.item(),
+            'census_loss': census_loss_inter.item(),
             'census_origin': census_loss_origin.item(),
+            'census_both': census_loss.item(),
             'flow_loss': distill_loss.item(),
             'geometry_loss': geo_loss.item(),
         }
