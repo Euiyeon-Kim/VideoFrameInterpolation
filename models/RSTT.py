@@ -114,7 +114,7 @@ class RSTTv1(nn.Module):
         robust_weight0 = get_robust_weight(pred_f01, f01, beta=0.3)
         robust_weight1 = get_robust_weight(pred_f10, f10, beta=0.3)
         distill_loss = 0.01 * (self.rb_loss(pred_f01 - f01, weight=robust_weight0) +
-                               self.rb_loss(pred_f10 - f01, weight=robust_weight0))
+                               self.rb_loss(pred_f10 - f10, weight=robust_weight1))
         total_loss = l1_loss + census_loss + geo_loss + distill_loss
 
         return {
