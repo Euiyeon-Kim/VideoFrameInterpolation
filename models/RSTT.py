@@ -39,8 +39,9 @@ class RSTTv1(nn.Module):
 
         self.l1_loss = Charbonnier_L1()
         self.tr_loss = Ternary(7)
-        self.rb_loss = Charbonnier_Ada()
+        # self.rb_loss = Charbonnier_Ada()
         self.gc_loss = Geometry(3)
+        self.mse_loss = nn.MSELoss()
 
     def generate_rgb_frame(self, feat, m):
         out = self.lrelu(self.pixel_shuffle(self.upconv1(feat)))
@@ -111,10 +112,12 @@ class RSTTv1(nn.Module):
                            self.gc_loss(pred_feat_t_2, ft_2) +
                            self.gc_loss(pred_feat_t_3, ft_3))
         pred_f01, pred_f10 = resize(f01_4, 8.0) * 8.0, resize(f10_4, 8.0) * 8.0
-        robust_weight0 = get_robust_weight(pred_f01, f01, beta=0.3)
-        robust_weight1 = get_robust_weight(pred_f10, f10, beta=0.3)
-        distill_loss = 0.01 * (self.rb_loss(pred_f01 - f01, weight=robust_weight0) +
-                               self.rb_loss(pred_f10 - f10, weight=robust_weight1))
+        # MSE loss
+        distill_loss = 0.01 * (self.mse_loss(pred_f01, f01) + self.mse_loss(pred_f10, f10))
+        # robust_weight0 = get_robust_weight(pred_f01, f01, beta=0.3)
+        # robust_weight1 = get_robust_weight(pred_f10, f10, beta=0.3)
+        # distill_loss = 0.01 * (self.rb_loss(pred_f01 - f01, weight=robust_weight0) +
+        #                        self.rb_loss(pred_f10 - f10, weight=robust_weight1))
         total_loss = l1_loss + census_loss + geo_loss + distill_loss
 
         return {
