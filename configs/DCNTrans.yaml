@@ -2,7 +2,7 @@ seed: 42
 
 
 # Model
-model_name: DCNIFRv1
+model_name: DCNTransv1
 nf: 64
 enc_res_blocks: 5
 
@@ -14,7 +14,7 @@ data_name: Vimeo90K                          # Vimeo90K, X4K
 root: datasets/vimeo_triplet                 # vimeo_triplet, X4K1000FPS
 crop_h: 224
 crop_w: 224
-batch_size: 2                                # Per GPU
+batch_size: 8                                # Per GPU
 num_workers: 8
 
 

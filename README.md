@@ -15,9 +15,9 @@
 - Decoder 1는 output residual flow 5개
 
 
-**DCNIFRv1 (?)**
+**DCNTransv1 (?)**
 - 원래 IFRNet은 Decoder4에서 바로 feature t 생성해버림
-- 여기서는 Query builder로 feat_t_4 생성
+- 여기서는 DCN을 사용한 Query builder로 feat_t_4 생성
 
 
 ### To Do
