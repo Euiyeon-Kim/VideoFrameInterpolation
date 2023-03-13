@@ -10,7 +10,7 @@ data_name: Vimeo90K                          # Vimeo90K, X4K
 root: datasets/vimeo_triplet                 # vimeo_triplet, X4K1000FPS
 crop_h: 224
 crop_w: 224
-batch_size: 12
+batch_size: 8
 num_workers: 8
 val_datasets:
   - vimeo90k

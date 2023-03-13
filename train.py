@@ -75,7 +75,7 @@ def train(args, ddp_model):
 
             # Optimize
             total_loss.backward()
-            torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), args.grad_clip)
+            # torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), args.grad_clip)
             optimizer.step()
 
             # Logging

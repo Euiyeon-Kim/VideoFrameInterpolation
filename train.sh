@@ -1,8 +1,8 @@
-NUM_GPUS=2
+NUM_GPUS=1
 
 python -m torch.distributed.launch \
 --nproc_per_node=${NUM_GPUS} \
 train.py \
---exp_name RSTTv1_ReconLossAll_G001_D001MSE  \
---config configs/RSTT.yaml \
+--exp_name DCNIFR/debug  \
+--config configs/DCNIFR.yaml \
 --world_size ${NUM_GPUS}

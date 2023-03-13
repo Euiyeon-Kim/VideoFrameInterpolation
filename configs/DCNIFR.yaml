@@ -2,7 +2,9 @@ seed: 42
 
 
 # Model
-model_name: RSTTv1
+model_name: DCNIFRv1
+nf: 64
+enc_res_blocks: 5
 
 
 # Data
