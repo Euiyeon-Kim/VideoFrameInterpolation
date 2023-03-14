@@ -6,6 +6,7 @@ from models.GMTrans import Decoder2, resize
 from models.IFRNet import ResBlock, convrelu
 from modules.residual_encoder import make_layer
 from modules.dcnv2 import DeformableConv2d
+from utils.flow_viz import flow_tensor_to_np
 
 
 class Decoder4v1(nn.Module):
@@ -81,8 +82,9 @@ class DCNTransv1(nn.Module):
         self.l1_loss = Charbonnier_L1()
         self.tr_loss = Ternary(7)
         self.gc_loss = Geometry(3)
-        self.offset_lambda = args.offset_lambda
-        self.offset_loss = OffsetFidelityLoss(threshold=args.offset_thresh)
+        self.rb_loss = Charbonnier_Ada()
+        # self.offset_lambda = args.offset_lambda
+        # self.offset_loss = OffsetFidelityLoss(threshold=args.offset_thresh)
 
     @staticmethod
     def get_log_dict(inp_dict, results_dict):
@@ -94,7 +96,15 @@ class DCNTransv1(nn.Module):
         err_map = (xt_01 - pred_last).abs()
         pred_concat = torch.cat((half[None], pred_last, xt_01[None], err_map), dim=-1)
 
+        pseudo_gt_fwd_flow_viz = flow_tensor_to_np(inp_dict['f01'][0]) / 255.
+        pseudo_gt_bwd_flow_viz = flow_tensor_to_np(inp_dict['f10'][0]) / 255.
+        fwd_flow_viz = flow_tensor_to_np(results_dict['f01'][0]) / 255.
+        bwd_flow_viz = flow_tensor_to_np(results_dict['f10'][0]) / 255.
+        viz_flow = torch.cat((torch.from_numpy(pseudo_gt_fwd_flow_viz).cuda(), torch.from_numpy(fwd_flow_viz).cuda(),
+                              torch.from_numpy(bwd_flow_viz).cuda(), torch.from_numpy(pseudo_gt_bwd_flow_viz).cuda()), dim=-1)
+
         return {
+            'flow': viz_flow,
             'pred': pred_concat[0],
         }
 
@@ -147,17 +157,27 @@ class DCNTransv1(nn.Module):
         l1_loss = self.l1_loss(imgt_pred - xt)
         census_loss = self.tr_loss(imgt_pred, xt)
         geo_loss = 0.01 * (self.gc_loss(pred_feat_t_3, ft_3))
-        resized_ft0, resized_ft1 = resize(ft0, 1 / 8), resize(ft1, 1 / 8)
-        offset_loss = self.offset_lambda * (self.offset_loss(ft0_offset, resized_ft0) +
-                                            self.offset_loss(ft1_offset, resized_ft1))
-        total_loss = l1_loss + census_loss + geo_loss + offset_loss
+
+        # resized_ft0, resized_ft1 = resize(ft0, 1 / 8) / 8., resize(ft1, 1 / 8)
+        # offset_loss = self.offset_lambda * (self.offset_loss(ft0_offset, resized_ft0) +
+        #                                     self.offset_loss(ft1_offset, resized_ft1))
+
+        pred_ft0_offset, pred_ft1_offset = resize(ft0_offset, 8) * 8., resize(ft1_offset, 8) * 8.
+        robust_weight0 = get_robust_weight(pred_ft0_offset, ft0, beta=0.3)
+        robust_weight1 = get_robust_weight(pred_ft1_offset, ft1, beta=0.3)
+        distill_loss = 0.01 * (self.rb_loss(pred_ft0_offset - ft0, weight=robust_weight0) +
+                               self.rb_loss(pred_ft1_offset - ft1, weight=robust_weight1))
+
+        total_loss = l1_loss + census_loss + geo_loss + distill_loss
 
         return {
             'frame_preds': [imgt_pred],
+            'f01': pred_ft0_offset,
+            'f10': pred_ft1_offset,
         }, total_loss, {
             'total_loss': total_loss.item(),
             'l1_loss': l1_loss.item(),
             'census_loss': census_loss.item(),
             'geometry_loss': geo_loss.item(),
-            'offset_loss': offset_loss.item(),
+            'distill_loss': distill_loss.item(),
         }
