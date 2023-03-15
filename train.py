@@ -3,7 +3,6 @@ import time
 import shutil
 import argparse
 
-import numpy as np
 import oyaml as yaml
 from dotmap import DotMap
 
@@ -20,21 +19,13 @@ import models
 import data as benchmarks
 from utils.logger import Logger
 from evaluate import validate_vimeo90k
-
-
-def get_lr(args, iters):
-    ratio = 0.5 * (1.0 + np.cos(iters / (args.num_epochs * args.iters_per_epoch) * np.pi))
-    lr = (args.start_lr - args.end_lr) * ratio + args.end_lr
-    return lr
-
-
-def set_lr(optimizer, lr):
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
+from utils.scheduler import CosineAnnealingLR_Restart
 
 
 def train(args, ddp_model):
     local_rank = args.local_rank
+
+    # Preparation for training
     if local_rank == 0:
         os.makedirs(args.log_dir, exist_ok=True)
         shutil.copy(args.config, os.path.join(args.log_dir, 'config.yaml'))
@@ -44,6 +35,7 @@ def train(args, ddp_model):
         num_params = sum(p.numel() for p in ddp_model.parameters())
         print('Number of params:', num_params)
 
+    # Build Dataloader
     dataset_train = getattr(benchmarks, f'{args.data_name}')(args)
     sampler = DistributedSampler(dataset_train)
     dataloader_train = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.num_workers,
@@ -52,7 +44,14 @@ def train(args, ddp_model):
     args.iters_per_epoch = len(dataloader_train)
     iters = args.resume_epoch * args.iters_per_epoch
 
-    optimizer = optim.AdamW(ddp_model.parameters(), lr=args.start_lr, weight_decay=0)
+    # Build optimizer and scheduler
+    optimizer = optim.AdamW(ddp_model.parameters(), lr=args.start_lr, weight_decay=0, betas=(0.9, 0.99))
+    scheduler = CosineAnnealingLR_Restart(
+        optimizer, [400000, 800000, 1200000, 1600000],
+        eta_min=1e-7,
+        restarts=[400000, 800000, 1200000],
+        weights=[0.5, 0.5, 0.5]
+    )
 
     best_psnr = 0.0
     for epoch in range(args.resume_epoch, args.num_epochs):
@@ -62,10 +61,6 @@ def train(args, ddp_model):
             for k, v in batch.items():
                 batch[k] = v.to(args.device)
             time_stamp = time.time()
-
-            # Set lr
-            cur_lr = get_lr(args, iters)
-            set_lr(optimizer, cur_lr)
 
             # Init gradient
             optimizer.zero_grad()
@@ -77,10 +72,12 @@ def train(args, ddp_model):
             total_loss.backward()
             # torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), args.grad_clip)
             optimizer.step()
-
+            scheduler.step()
             # Logging
             train_time_interval = time.time() - time_stamp
+
             if local_rank == 0:
+                cur_lr = optimizer.param_groups[0]['lr']
                 metrics.update({
                     'lr': cur_lr,
                     'time': train_time_interval,
@@ -98,6 +95,7 @@ def train(args, ddp_model):
                     torch.save({
                         'model': ddp_model.module.state_dict(),
                         'optimizer': optimizer.state_dict(),
+                        'scheduler': scheduler.state_dict(),
                         'epoch': epoch,
                         'step': iters + 1,
                         'best_psnr': best_psnr,
@@ -166,6 +164,7 @@ if __name__ == '__main__':
         checkpoint = torch.load(args.load_gmflow, map_location='cpu')['model']
         model.load_state_dict(checkpoint, strict=False)
 
+    # Distiribute to multiple GPUs
     ddp_model = DDP(model, device_ids=[args.local_rank], output_device=args.local_rank)
 
     train(args, ddp_model)

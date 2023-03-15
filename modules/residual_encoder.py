@@ -15,13 +15,13 @@ class ResBlocknoBN(nn.Module):
         super(ResBlocknoBN, self).__init__()
         self.conv1 = nn.Conv2d(nf, nf, 3, 1, 1, bias=True)
         self.conv2 = nn.Conv2d(nf, nf, 3, 1, 1, bias=True)
-
+        self.prelu = nn.PReLU(nf)
         # initialization
         initialize_weights([self.conv1, self.conv2], 0.1)
 
     def forward(self, x):
         identity = x
-        out = F.relu(self.conv1(x), inplace=True)
+        out = self.prelu(self.conv1(x))
         out = self.conv2(out)
         return identity + out
 

@@ -153,7 +153,7 @@ class BaseDataset(Dataset):
             frames[:, :, 6:9] = imgt[:, :, ::-1]
 
         # Flip augmentation - vertical
-        if random.random() < 0.3:
+        if random.random() < 0.5:
             frames = frames[::-1, :, :]
             flow = np.concatenate((frames[:, :, 9:10], -frames[:, :, 10:11],
                                    frames[:, :, 11:12], -frames[:, :, 12:13]), 2)

@@ -24,7 +24,14 @@ class DeformableConv2d(nn.Module):
         self.offset_flow_conv.apply(self.init_weights)
 
         # Generate residual flow and modulator
-        self.conv_offset_mask = nn.Conv2d(in_channels * 2 + 2, groups * 3 * kernel_size * kernel_size, 3, 1, 1)
+        self.conv_offset_mask = nn.Sequential(
+            nn.Conv2d(in_channels * 2 + 2, in_channels, 3, 1, 1),
+            nn.PReLU(in_channels),
+            nn.Conv2d(in_channels, in_channels, 3, 1, 1),
+            nn.PReLU(in_channels),
+            nn.Conv2d(in_channels, groups * 3 * kernel_size * kernel_size, 3, 1, 1),
+        )
+        # self.conv_offset_mask = nn.Conv2d(in_channels * 2 + 2, groups * 3 * kernel_size * kernel_size, 3, 1, 1)
         self.conv_offset_mask.apply(self.init_weights)
 
         self.regular_conv = nn.Conv2d(in_channels=in_channels // groups,

@@ -17,19 +17,15 @@ class Decoder4v1(nn.Module):
             convrelu(nc * 2, nc),
             ResBlock(nc, nc // 2),
         )
-        self.dcn0t = DeformableConv2d(nc, nc)
-        self.dcn1t = DeformableConv2d(nc, nc)
-        self.blendblock = nn.Sequential(
-            convrelu(nc * 2, nc),
-            ResBlock(nc, nc // 2),
-        )
+        self.dcn = DeformableConv2d(nc, nc)
+        # self.dcn1t = DeformableConv2d(nc, nc)
+        self.blendblock = nn.Conv2d(nc * 2, nc, 3, 1, 1)
 
     def forward(self, f0, f1):
         f01_offset_feat = self.convblock(torch.cat((f0, f1), 1))
         f10_offset_feat = self.convblock(torch.cat((f1, f0), 1))
-
-        ft_from_f0, ft0_offset = self.dcn0t(f0, f01_offset_feat)
-        ft_from_f1, ft1_offset = self.dcn1t(f1, f10_offset_feat)
+        ft_from_f0, ft0_offset = self.dcn(f0, f01_offset_feat)
+        ft_from_f1, ft1_offset = self.dcn(f1, f10_offset_feat)
         out = self.blendblock(torch.cat((ft_from_f0, ft_from_f1), 1))
         return out, ft0_offset, ft1_offset
 
@@ -72,8 +68,9 @@ class DCNTransv1(nn.Module):
         self.query_builder1 = nn.ConvTranspose2d(args.nf, args.nf, 4, 2, 1)
         self.decoder1 = Decoder2(inp_dim=args.nf, depth=6, num_heads=4, window_size=4)
 
-        self.prelu1 = nn.PReLU(args.nf)
+        self.reconstruction = make_layer(nf=args.nf, n_layers=args.dec_res_blocks)
         self.upconv1 = nn.Conv2d(args.nf, args.nf * 4, 3, 1, 1, bias=True)
+        self.prelu1 = nn.PReLU(args.nf)
         self.pixel_shuffle = nn.PixelShuffle(2)
         self.HRconv = nn.Conv2d(args.nf, args.nf, 3, 1, 1)
         self.prelu2 = nn.PReLU(args.nf)
@@ -116,7 +113,8 @@ class DCNTransv1(nn.Module):
         return feat2, feat3, feat4
 
     def generate_rgb_frame(self, feat, m):
-        out = self.prelu1(self.pixel_shuffle(self.upconv1(feat)))
+        out = self.reconstruction(feat)
+        out = self.prelu1(self.pixel_shuffle(self.upconv1(out)))
         out = self.prelu2(self.HRconv(out))
         out = self.conv_last(out)
         return torch.clamp(out + m, 0, 1)
@@ -179,5 +177,5 @@ class DCNTransv1(nn.Module):
             'l1_loss': l1_loss.item(),
             'census_loss': census_loss.item(),
             'geometry_loss': geo_loss.item(),
-            'distill_loss': distill_loss.item(),
+            'flow_loss': distill_loss.item(),
         }
