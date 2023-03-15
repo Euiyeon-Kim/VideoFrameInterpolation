@@ -19,8 +19,8 @@ class DCNInterFeatBuilder(nn.Module):
             nn.Conv2d(nc, nc, 3, 1, 1),
             nn.PReLU(nc),
         )
-        self.dcn = DeformableConv2d(nc, nc)
-        # self.dcn1t = DeformableConv2d(nc, nc)
+        self.dcn0t = DeformableConv2d(nc, nc)
+        self.dcn1t = DeformableConv2d(nc, nc)
         self.blendblock = nn.Sequential(
             convrelu(nc * 2, nc),
             ResBlock(nc, nc // 2),
@@ -29,8 +29,8 @@ class DCNInterFeatBuilder(nn.Module):
     def forward(self, f0, f1):
         f01_offset_feat = self.convblock(torch.cat((f0, f1), 1))
         f10_offset_feat = self.convblock(torch.cat((f1, f0), 1))
-        ft_from_f0, ft0_offset = self.dcn(f0, f01_offset_feat)
-        ft_from_f1, ft1_offset = self.dcn(f1, f10_offset_feat)
+        ft_from_f0, ft0_offset = self.dcn0t(f0, f01_offset_feat)
+        ft_from_f1, ft1_offset = self.dcn1t(f1, f10_offset_feat)
         out = self.blendblock(torch.cat((ft_from_f0, ft_from_f1), 1))
         return out, ft0_offset, ft1_offset
 
