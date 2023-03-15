@@ -154,7 +154,7 @@ class SwinIRBlock(nn.Module):
         self.norm1 = norm_layer(dim)
         self.attn = WindowAttention(dim, window_size=(self.window_size, self.window_size), num_heads=num_heads)
         self.norm2 = norm_layer(dim)
-        self.norm_feat = norm_layer(dim)
+        self.merge = nn.Linear(dim, dim, bias=False)
 
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer)
@@ -168,9 +168,6 @@ class SwinIRBlock(nn.Module):
                                                   (self.shift_size, self.shift_size))
 
         shortcut = x
-        x = self.norm1(x)
-        feat = self.norm_feat(feat)
-
         pad_h = (window_size[0] - h % window_size[0]) % window_size[0]
         pad_w = (window_size[1] - w % window_size[1]) % window_size[1]
         x = F.pad(x, (0, 0, 0, pad_w, 0, pad_h))
@@ -208,9 +205,12 @@ class SwinIRBlock(nn.Module):
         if pad_w > 0 or pad_h > 0:
             x = x[:, :, :h, :w, :].contiguous()
 
+        x = self.merge(x)
+        x = self.norm1(x)
+
         # FFN
         x = shortcut + x
-        x = x + self.mlp(self.norm2(x))
+        x = x + self.norm2(self.mlp(x))
 
         return x
 
@@ -293,10 +293,21 @@ class Decoder3(nn.Module):
 
 
 class Decoder2(nn.Module):
-    def __init__(self, inp_dim, depth, num_heads, window_size, mlp_ratio=2.):
+    def __init__(self, inp_dim, depth, num_heads, window_size, mlp_ratio=4.):
         super(Decoder2, self).__init__()
         self.transformer = BasicLayer(dim=inp_dim, depth=depth, num_heads=num_heads,
                                       window_size=window_size, mlp_ratio=mlp_ratio)
+        self.transformer.apply(self._init_weights)
+
+    @staticmethod
+    def _init_weights(m):
+        if isinstance(m, nn.Linear):
+            trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
 
     def forward(self, x, source, target):
         x = self.transformer(x, source, target)

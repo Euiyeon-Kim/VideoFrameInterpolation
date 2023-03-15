@@ -9,23 +9,28 @@ from modules.dcnv2 import DeformableConv2d
 from utils.flow_viz import flow_tensor_to_np
 
 
-class Decoder4v1(nn.Module):
+class DCNInterFeatBuilder(nn.Module):
     def __init__(self, nc):
-        super(Decoder4v1, self).__init__()
+        super(DCNInterFeatBuilder, self).__init__()
         self.nc = nc
         self.convblock = nn.Sequential(
+            nn.Conv2d(nc * 2, nc, 3, 1, 1),
+            nn.PReLU(nc),
+            nn.Conv2d(nc, nc, 3, 1, 1),
+            nn.PReLU(nc),
+        )
+        self.dcn0t = DeformableConv2d(nc, nc)
+        self.dcn1t = DeformableConv2d(nc, nc)
+        self.blendblock = nn.Sequential(
             convrelu(nc * 2, nc),
             ResBlock(nc, nc // 2),
         )
-        self.dcn = DeformableConv2d(nc, nc)
-        # self.dcn1t = DeformableConv2d(nc, nc)
-        self.blendblock = nn.Conv2d(nc * 2, nc, 3, 1, 1)
 
     def forward(self, f0, f1):
         f01_offset_feat = self.convblock(torch.cat((f0, f1), 1))
         f10_offset_feat = self.convblock(torch.cat((f1, f0), 1))
-        ft_from_f0, ft0_offset = self.dcn(f0, f01_offset_feat)
-        ft_from_f1, ft1_offset = self.dcn(f1, f10_offset_feat)
+        ft_from_f0, ft0_offset = self.dcn0t(f0, f01_offset_feat)
+        ft_from_f1, ft1_offset = self.dcn1t(f1, f10_offset_feat)
         out = self.blendblock(torch.cat((ft_from_f0, ft_from_f1), 1))
         return out, ft0_offset, ft1_offset
 
@@ -60,13 +65,14 @@ class DCNTransv1(nn.Module):
             nn.Conv2d(args.nf, args.nf, 3, 1, 1, bias=True),
             nn.PReLU(args.nf),
         )
-        self.decoder3 = Decoder4v1(nc=args.nf)
+
+        self.dcn_feat_t_builder = DCNInterFeatBuilder(nc=args.nf)
 
         self.query_builder2 = nn.ConvTranspose2d(args.nf, args.nf, 4, 2, 1)
-        self.decoder2 = Decoder2(inp_dim=args.nf, depth=6, num_heads=8, window_size=4)
+        self.decoder2 = Decoder2(inp_dim=args.nf, depth=8, num_heads=8, window_size=4, mlp_ratio=args.mlp_ratio)
 
         self.query_builder1 = nn.ConvTranspose2d(args.nf, args.nf, 4, 2, 1)
-        self.decoder1 = Decoder2(inp_dim=args.nf, depth=6, num_heads=4, window_size=4)
+        self.decoder1 = Decoder2(inp_dim=args.nf, depth=8, num_heads=4, window_size=4, mlp_ratio=args.mlp_ratio)
 
         self.reconstruction = make_layer(nf=args.nf, n_layers=args.dec_res_blocks)
         self.upconv1 = nn.Conv2d(args.nf, args.nf * 4, 3, 1, 1, bias=True)
@@ -99,7 +105,6 @@ class DCNTransv1(nn.Module):
         bwd_flow_viz = flow_tensor_to_np(results_dict['f10'][0]) / 255.
         viz_flow = torch.cat((torch.from_numpy(pseudo_gt_fwd_flow_viz).cuda(), torch.from_numpy(fwd_flow_viz).cuda(),
                               torch.from_numpy(bwd_flow_viz).cuda(), torch.from_numpy(pseudo_gt_bwd_flow_viz).cuda()), dim=-1)
-
         return {
             'flow': viz_flow,
             'pred': pred_concat[0],
@@ -132,7 +137,7 @@ class DCNTransv1(nn.Module):
         feat1_1, feat1_2, feat1_3 = self.extract_feature(x1_)
 
         # Pred with DCN
-        pred_feat_t_3, ft0_offset, ft1_offset = self.decoder3(feat0_3, feat1_3)
+        pred_feat_t_3, ft0_offset, ft1_offset = self.dcn_feat_t_builder(feat0_3, feat1_3)
 
         # Attention
         feat_t_2_query = self.query_builder2(pred_feat_t_3)
@@ -150,11 +155,12 @@ class DCNTransv1(nn.Module):
         ft0, ft1 = inp_dict['f01'], inp_dict['f10']
         xt = inp_dict['xt'] / 255
         xt_ = xt - mean_
-        _, _, ft_3 = self.extract_feature(xt_)
+        _, ft_2, ft_3 = self.extract_feature(xt_)
 
         l1_loss = self.l1_loss(imgt_pred - xt)
         census_loss = self.tr_loss(imgt_pred, xt)
-        geo_loss = 0.01 * (self.gc_loss(pred_feat_t_3, ft_3))
+        geo_loss = 0.01 * (self.gc_loss(pred_feat_t_3, ft_3) +
+                           self.gc_loss(feat_t_2_query, ft_2))
 
         # resized_ft0, resized_ft1 = resize(ft0, 1 / 8) / 8., resize(ft1, 1 / 8)
         # offset_loss = self.offset_lambda * (self.offset_loss(ft0_offset, resized_ft0) +
