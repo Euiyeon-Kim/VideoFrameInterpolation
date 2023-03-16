@@ -6,6 +6,7 @@ import torch.nn as nn
 from modules.warp import bwarp
 from models.base import Basemodel
 from modules.dcnv2 import DeformableConv2d
+from models.GMM2M import PositionEmbeddingSine
 from modules.residual_encoder import make_layer
 
 
@@ -74,12 +75,13 @@ class DCNQueryBuilder(nn.Module):
 
 
 class CrossDeformableAttentionBlock(nn.Module):
-    def __init__(self, in_c, out_c, attn_window=(3, 3), groups=12, n_heads=12):
+    def __init__(self, in_c, out_c, kv_h, kv_w, attn_window=(3, 3), groups=12, n_heads=12, mlp_ratio=2.0):
         self.in_c = in_c
         self.out_c = out_c
         self.groups = groups
         self.n_heads = n_heads
         self.attn_window = attn_window
+        self.kv_h, self.kv_w = kv_h, kv_w
 
         # Calculate residual offset
         self.conv_res_offset = nn.Sequential(
@@ -90,6 +92,17 @@ class CrossDeformableAttentionBlock(nn.Module):
             nn.Conv2d(self.in_c, groups * attn_window[0] * attn_window[1] * 2, 3, 1, 1),
         )
         self.conv_res_offset.apply(self.init_zero)
+
+        self.proj_q = nn.Linear(in_c, in_c)
+        self.proj_k = nn.Linear(in_c, in_c)
+        self.proj_v = nn.Linear(in_c, in_c)
+        self.norm1 = nn.LayerNorm(in_c)
+        self.mlp = nn.Sequential(
+            nn.Linear(in_c, in_c * mlp_ratio, bias=False),
+            nn.GELU(),
+            nn.Linear(in_c * mlp_ratio, in_c, bias=False),
+        )
+        self.norm2 = nn.LayerNorm(in_c)
 
     @staticmethod
     def init_zero(m):
@@ -103,7 +116,6 @@ class CrossDeformableAttentionBlock(nn.Module):
         res_offset = self.conv_res_offset(torch.cat((q_feat_t, kv_to_q, offset_from_flow_tx)))
         print(res_offset.shape)
         exit()
-        pass
 
 
 class DATv1(Basemodel):
@@ -113,6 +125,8 @@ class DATv1(Basemodel):
     """
     def __init__(self, args):
         super(DATv1, self).__init__(args)
+        self.nf = args.nf
+
         self.cnn_encoder = ResEncoder(args.nf, args.enc_res_blocks)
         self.query_builder = DCNQueryBuilder(args.nf)
         self.query_upsampler = nn.ConvTranspose2d(args.nf, args.nf, 4, 2, 1)
@@ -126,4 +140,4 @@ class DATv1(Basemodel):
         feat0_1, feat0_2, feat0_3, feat0_4 = self.cnn_encoder(x0)
         feat1_1, feat1_2, feat1_3, feat1_4 = self.cnn_encoder(x1)
 
-        query_feat_t_3, ft0_offset_4, ft1_offset_4 = self.query_builder(feat0_4, feat1_4)
+        pred_feat_t_3, ft0_offset_4, ft1_offset_4 = self.query_builder(feat0_4, feat1_4)
