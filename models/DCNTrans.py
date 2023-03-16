@@ -41,7 +41,6 @@ class DCNTransv1(nn.Module):
         self.args = args
 
         # Feature extraction
-        layers = []
         self.conv_first = nn.Sequential(
             nn.Conv2d(3, args.nf, 3, 1, 1, bias=True),
             nn.PReLU(args.nf),

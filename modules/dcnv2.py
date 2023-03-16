@@ -50,9 +50,9 @@ class DeformableConv2d(nn.Module):
 
         out = self.conv_offset_mask(torch.cat((feat_t_from_x, movement_feat, offset_flow_tx), dim=1))
         res_o1, res_o2, mask = torch.chunk(out, 3, dim=1)
-        res_offset = torch.tanh(torch.cat((res_o1, res_o2), dim=1))
+        res_offset = 2. * torch.tanh(torch.cat((res_o1, res_o2), dim=1))
 
-        offset = 2. * res_offset + offset_flow_tx.flip(1).repeat(1, res_offset.size(1) // 2, 1, 1)
+        offset = res_offset + offset_flow_tx.flip(1).repeat(1, res_offset.size(1) // 2, 1, 1)
         mask = torch.sigmoid(mask)
 
         x = torchvision.ops.deform_conv2d(input=x,
