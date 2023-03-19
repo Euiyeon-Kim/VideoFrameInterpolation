@@ -103,6 +103,17 @@ def train(args, ddp_model):
 
             iters += 1
 
+        if (epoch + 1) % args.save_every_freq_epoch == 0 and local_rank == 0:
+            checkpoint_path = f'{args.log_dir}/epoch_{epoch+1:03d}.pth'
+            torch.save({
+                'model': ddp_model.module.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'scheduler': scheduler.state_dict(),
+                'epoch': epoch,
+                'step': iters + 1,
+                'best_psnr': best_psnr,
+            }, checkpoint_path)
+
         if (epoch + 1) % args.valid_freq_epoch == 0 and local_rank == 0:
             val_results = {}
 

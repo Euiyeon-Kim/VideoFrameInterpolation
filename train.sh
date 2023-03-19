@@ -1,8 +1,8 @@
-NUM_GPUS=1
+NUM_GPUS=4
 
 python -m torch.distributed.launch \
 --nproc_per_node=${NUM_GPUS} \
 train.py \
---exp_name DAT/debug \
+--exp_name DAT/DCNTransv2_swinV2_sepDCNAvgFwarpD4_dim64_enc5dec5_GeoF32_Distill_halfTonly \
 --config configs/DAT.yaml \
 --world_size ${NUM_GPUS}
