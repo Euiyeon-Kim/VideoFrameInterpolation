@@ -40,7 +40,6 @@ def train(args, ddp_model):
     sampler = DistributedSampler(dataset_train)
     dataloader_train = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.num_workers,
                                   pin_memory=True, drop_last=True, sampler=sampler)
-
     args.iters_per_epoch = len(dataloader_train)
     iters = args.resume_epoch * args.iters_per_epoch
 

@@ -203,11 +203,11 @@ class DCNInterFeatBuilderv2(nn.Module):
             ResBlock(nc, nc // 2),
         )
 
-    def forward(self, f0, f1):
+    def forward(self, f0, f1, t):
         f01_offset_feat = self.convblock(torch.cat((f0, f1), 1))
         f10_offset_feat = self.convblock(torch.cat((f1, f0), 1))
-        ft_from_f0, ft0_offset = self.dcn0t(f0, f01_offset_feat)
-        ft_from_f1, ft1_offset = self.dcn1t(f1, f10_offset_feat)
+        ft_from_f0, ft0_offset = self.dcn0t(f0, t, f01_offset_feat)
+        ft_from_f1, ft1_offset = self.dcn1t(f1, 1 - t, f10_offset_feat)
         out = self.blendblock(torch.cat((ft_from_f0, ft_from_f1), 1))
         return out, ft0_offset, ft1_offset
 
@@ -313,7 +313,7 @@ class DCNTransv2(nn.Module):
         feat1_1, feat1_2, feat1_3 = self.extract_feature(x1_)
 
         # Pred with DCN
-        pred_feat_t_3, ft0_offset, ft1_offset = self.dcn_feat_t_builder(feat0_3, feat1_3)
+        pred_feat_t_3, ft0_offset, ft1_offset = self.dcn_feat_t_builder(feat0_3, feat1_3, t)
 
         # Attention
         feat_t_2_query = self.query_builder2(pred_feat_t_3)

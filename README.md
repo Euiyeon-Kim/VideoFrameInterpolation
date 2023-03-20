@@ -23,7 +23,7 @@
 - 여기서는 DCN을 사용한 Query builder로 feat_t_3 생성
 - GMTrans에 있는 decoder2 로 decoding
 
-**DCNTransv1_decRes10_GeoF3_noDistill_halfTonly**
+**DCNTransv1_decRes10_GeoF3_noDistill_halfTonly (5,509,399)**
 - encoder residual layer 5개, decoder residual 10개
 
 ### To Do
