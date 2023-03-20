@@ -10,6 +10,9 @@ from modules.dcnv2 import DeformableConv2d, DeformableConv2dwithFwarp
 
 
 class DCNInterFeatBuilder(nn.Module):
+    """
+        Backward warping으로 query building
+    """
     def __init__(self, nc):
         super(DCNInterFeatBuilder, self).__init__()
         self.nc = nc
@@ -187,6 +190,9 @@ class DCNTransv1(nn.Module):
 
 
 class DCNInterFeatBuilderv2(nn.Module):
+    """
+        Average forward warping으로 query building
+    """
     def __init__(self, nc):
         super(DCNInterFeatBuilderv2, self).__init__()
         self.nc = nc

@@ -3,6 +3,14 @@
 ### To Try
 - [ ] m2m Flow variance 가 낮아지게 학습해보기
 - [ ] distillation 할 때 epe기준 말고 variance 기준 weighting (modify get robust weight)
+- [ ] 좀 흐려보이는데 cosine positional encoding 추가해보기  
+- [ ] RAFT 처럼 attention 할 수 있는 방법 찾아보기
+
+### To Do
+- [ ] Resume training
+  - [ ] 모델 weight loading
+  - [ ] logger start step 설정
+
 
 ## Models
 
@@ -26,7 +34,8 @@
 **DCNTransv1_decRes10_GeoF3_noDistill_halfTonly (5,509,399)**
 - encoder residual layer 5개, decoder residual 10개
 
-### To Do
-- [ ] Resume training
-  - [ ] 모델 weight loading
-  - [ ] logger start step 설정
+### DCNTrans
+- Deformable Conv로 Query building
+- Source Target에 대해 다 attention하고 mixing
+- Deformable attention 아니고 Swin attention임
+

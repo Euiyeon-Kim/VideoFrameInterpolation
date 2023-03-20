@@ -106,7 +106,7 @@ class DeformableConv2dwithFwarp(nn.Module):
 
     def forward(self, x, t, movement_feat):
         offset_flow = self.offset_flow_conv(movement_feat)   # B, 2, fH, fW
-        offset_flow_tx = - fwarp(offset_flow, offset_flow * t, None, 'avg') * t
+        offset_flow_tx = - fwarp(offset_flow * t, offset_flow * t, None, 'avg')
         feat_t_from_x = bwarp(x, offset_flow_tx)
 
         out = self.conv_offset_mask(torch.cat((feat_t_from_x, movement_feat, offset_flow_tx), dim=1))

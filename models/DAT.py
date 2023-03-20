@@ -5,9 +5,9 @@ import torch.nn as nn
 
 from modules.warp import bwarp
 from models.base import Basemodel
-from modules.dcnv2 import DeformableConv2d
-from models.GMM2M import PositionEmbeddingSine
+from modules.deformable_attn import DeformAttn
 from modules.residual_encoder import make_layer
+from models.DCNTrans import DCNInterFeatBuilder
 
 
 class ResEncoder(nn.Module):
@@ -47,41 +47,13 @@ class ResEncoder(nn.Module):
         return feat1, feat2, feat3, feat4
 
 
-class DCNQueryBuilder(nn.Module):
-    def __init__(self, nc):
-        super(DCNQueryBuilder, self).__init__()
-        self.nc = nc
-        self.convblock = nn.Sequential(
-            nn.Conv2d(nc * 2, nc, 3, 1, 1),
-            nn.PReLU(nc),
-            nn.Conv2d(nc, nc, 3, 1, 1),
-            nn.PReLU(nc),
-        )
-        self.dcn0t = DeformableConv2d(nc, nc)
-        self.dcn1t = DeformableConv2d(nc, nc)
-        self.blendblock = nn.Sequential(
-            nn.Conv2d(nc * 2, nc * 2, 3, 1, 1),
-            nn.PReLU(nc * 2),
-            nn.ConvTranspose2d(nc * 2, nc, 4, 2, 1, bias=True)
-        )
-
-    def forward(self, f0, f1):
-        f01_offset_feat = self.convblock(torch.cat((f0, f1), 1))
-        f10_offset_feat = self.convblock(torch.cat((f1, f0), 1))
-        ft_from_f0, ft0_offset_flow = self.dcn0t(f0, f01_offset_feat)
-        ft_from_f1, ft1_offset_flow = self.dcn1t(f1, f10_offset_feat)
-        out = self.blendblock(torch.cat((ft_from_f0, ft_from_f1), 1))
-        return out, ft0_offset_flow, ft1_offset_flow
-
-
 class CrossDeformableAttentionBlock(nn.Module):
-    def __init__(self, in_c, out_c, kv_h, kv_w, attn_window=(3, 3), groups=12, n_heads=12, mlp_ratio=2.0):
+    def __init__(self, in_c, out_c, attn_window=(3, 3), groups=12, n_heads=12, mlp_ratio=2.0):
         self.in_c = in_c
         self.out_c = out_c
         self.groups = groups
         self.n_heads = n_heads
         self.attn_window = attn_window
-        self.kv_h, self.kv_w = kv_h, kv_w
 
         # Calculate residual offset
         self.conv_res_offset = nn.Sequential(
@@ -93,16 +65,7 @@ class CrossDeformableAttentionBlock(nn.Module):
         )
         self.conv_res_offset.apply(self.init_zero)
 
-        self.proj_q = nn.Linear(in_c, in_c)
-        self.proj_k = nn.Linear(in_c, in_c)
-        self.proj_v = nn.Linear(in_c, in_c)
-        self.norm1 = nn.LayerNorm(in_c)
-        self.mlp = nn.Sequential(
-            nn.Linear(in_c, in_c * mlp_ratio, bias=False),
-            nn.GELU(),
-            nn.Linear(in_c * mlp_ratio, in_c, bias=False),
-        )
-        self.norm2 = nn.LayerNorm(in_c)
+        self.attn = DeformAttn(in_c, out_c, attn_window, groups, n_heads, mlp_ratio)
 
     @staticmethod
     def init_zero(m):
@@ -110,11 +73,13 @@ class CrossDeformableAttentionBlock(nn.Module):
             m.weight.data.zero_()
             m.bias.data.zero_()
 
-    def forward(self, q_feat_t, kv_feat_x, offset_from_flow_tx):
-        # B, C, H, W
-        kv_to_q = bwarp(kv_feat_x, offset_from_flow_tx)
-        res_offset = self.conv_res_offset(torch.cat((q_feat_t, kv_to_q, offset_from_flow_tx)))
-        print(res_offset.shape)
+    def forward(self, q_feat_t, kv_feat_x, flow_tx):
+        kv_to_q = bwarp(kv_feat_x, flow_tx)
+        res_offset = self.conv_res_offset(torch.cat((q_feat_t, kv_to_q, flow_tx)))
+        offset = res_offset + flow_tx.flip(1).repeat(1, res_offset.size(1) // 2, 1, 1)
+        print(offset.shape)
+        exit()
+
         exit()
 
 
@@ -128,8 +93,11 @@ class DATv1(Basemodel):
         self.nf = args.nf
 
         self.cnn_encoder = ResEncoder(args.nf, args.enc_res_blocks)
-        self.query_builder = DCNQueryBuilder(args.nf)
+        self.query_builder = DCNInterFeatBuilder(args.nf)
         self.query_upsampler = nn.ConvTranspose2d(args.nf, args.nf, 4, 2, 1)
+
+        self.dat_scale3 = CrossDeformableAttentionBlock(args.nf, args.nf)
+
 
     @staticmethod
     def get_log_dict(inp_dict, results_dict):
@@ -140,4 +108,12 @@ class DATv1(Basemodel):
         feat0_1, feat0_2, feat0_3, feat0_4 = self.cnn_encoder(x0)
         feat1_1, feat1_2, feat1_3, feat1_4 = self.cnn_encoder(x1)
 
-        pred_feat_t_3, ft0_offset_4, ft1_offset_4 = self.query_builder(feat0_4, feat1_4)
+        pred_feat_t_4, ft0_4, ft1_4 = self.query_builder(feat0_4, feat1_4)
+        pred_feat_t_3 = self.query_upsampler(pred_feat_t_4)
+        a = self.dat_scale3(pred_feat_t_3, feat0_3, ft0_4)
+
+
+
+
+
+
