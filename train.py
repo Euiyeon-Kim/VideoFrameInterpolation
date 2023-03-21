@@ -19,7 +19,7 @@ import models
 import data as benchmarks
 from utils.logger import Logger
 from evaluate import validate_vimeo90k
-from utils.scheduler import CosineAnnealingLR_Restart
+from utils.scheduler import get_lr, set_lr
 
 
 def train(args, ddp_model):
@@ -42,15 +42,9 @@ def train(args, ddp_model):
                                   pin_memory=True, drop_last=True, sampler=sampler)
     args.iters_per_epoch = len(dataloader_train)
     iters = args.resume_epoch * args.iters_per_epoch
-
+    last_lr_decay_iter = args.iters_per_epoch * args.last_lr_decay_epoch
     # Build optimizer and scheduler
     optimizer = optim.AdamW(ddp_model.parameters(), lr=args.start_lr, weight_decay=0, betas=(0.9, 0.99))
-    scheduler = CosineAnnealingLR_Restart(
-        optimizer, [400000, 800000, 1200000, 1600000],
-        eta_min=1e-7,
-        restarts=[400000, 800000, 1200000],
-        weights=[0.5, 0.5, 0.5]
-    )
 
     best_psnr = 0.0
     for epoch in range(args.resume_epoch, args.num_epochs):
@@ -60,6 +54,9 @@ def train(args, ddp_model):
             for k, v in batch.items():
                 batch[k] = v.to(args.device)
             time_stamp = time.time()
+
+            cur_lr = get_lr(args, iters, last_lr_decay_iter)
+            set_lr(optimizer, cur_lr)
 
             # Init gradient
             optimizer.zero_grad()
@@ -71,12 +68,11 @@ def train(args, ddp_model):
             total_loss.backward()
             # torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), args.grad_clip)
             optimizer.step()
-            scheduler.step()
+
             # Logging
             train_time_interval = time.time() - time_stamp
 
             if local_rank == 0:
-                cur_lr = optimizer.param_groups[0]['lr']
                 metrics.update({
                     'lr': cur_lr,
                     'time': train_time_interval,
@@ -94,7 +90,6 @@ def train(args, ddp_model):
                     torch.save({
                         'model': ddp_model.module.state_dict(),
                         'optimizer': optimizer.state_dict(),
-                        'scheduler': scheduler.state_dict(),
                         'epoch': epoch,
                         'step': iters + 1,
                         'best_psnr': best_psnr,
@@ -107,9 +102,8 @@ def train(args, ddp_model):
             torch.save({
                 'model': ddp_model.module.state_dict(),
                 'optimizer': optimizer.state_dict(),
-                'scheduler': scheduler.state_dict(),
                 'epoch': epoch,
-                'step': iters + 1,
+                'step': iters,
                 'best_psnr': best_psnr,
             }, checkpoint_path)
 
@@ -143,7 +137,7 @@ if __name__ == '__main__':
     parser.add_argument('--config', type=str, default='configs/IFRNet.yaml', help='Configuration YAML path')
     parser.add_argument('--local_rank', default=0, type=int)
     parser.add_argument('--world_size', default=1, type=int)
-
+    parser.add_argument('--resume', default=0, type=int)
     # Parse Args from Configs
     parsed = parser.parse_args()
     with open(parsed.config, 'r') as f:
@@ -155,6 +149,9 @@ if __name__ == '__main__':
     args.local_rank = parsed.local_rank
     args.log_dir = os.path.join('exps', args.exp_name)
     args.num_workers = args.batch_size
+
+    # TODO
+    args.resume_epoch = parsed.resume
 
     # Set Environment - distributed training
     dist.init_process_group(backend='nccl', world_size=args.world_size)

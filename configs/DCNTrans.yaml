@@ -2,15 +2,15 @@ seed: 42
 
 
 # Model
-model_name: DCNTransv2
+model_name: DCNTransv1
 nf: 64
 enc_res_blocks: 5
 dec_res_blocks: 5
 mlp_ratio: 2
 
 # Data
-flow_dir: gmflow_scale2_refine6
-distill_bwd: False                            # True: learn ft0  False: learn f01
+flow_dir: flow
+distill_bwd: True                            # True: learn ft0  False: learn f01
 data_name: Vimeo90K                          # Vimeo90K, X4K
 root: datasets/vimeo_triplet                 # vimeo_triplet, X4K1000FPS
 crop_h: 224
@@ -21,10 +21,9 @@ num_workers: 8
 
 # Training
 start_lr: 2.0e-4
-resume_epoch: 0
+end_lr: 1.0e-6
+last_lr_decay_epoch: 300
 num_epochs: 2000
-offset_lambda: 0.1
-offset_thresh: 5.0
 valid_freq_epoch: 1
 val_datasets:
   - vimeo90k

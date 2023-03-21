@@ -73,7 +73,7 @@ class CrossDeformableAttentionBlock(nn.Module):
             m.weight.data.zero_()
             m.bias.data.zero_()
 
-    def forward(self, q_feat_t, kv_feat_x, flow_tx):
+    def forward(self, feat_t, feat0, feat1, ft0, ft1):
         kv_to_q = bwarp(kv_feat_x, flow_tx)
         res_offset = self.conv_res_offset(torch.cat((q_feat_t, kv_to_q, flow_tx)))
         offset = res_offset + flow_tx.flip(1).repeat(1, res_offset.size(1) // 2, 1, 1)
@@ -110,6 +110,7 @@ class DATv1(Basemodel):
 
         pred_feat_t_4, ft0_4, ft1_4 = self.query_builder(feat0_4, feat1_4)
         pred_feat_t_3 = self.query_upsampler(pred_feat_t_4)
+
         a = self.dat_scale3(pred_feat_t_3, feat0_3, ft0_4)
 
 

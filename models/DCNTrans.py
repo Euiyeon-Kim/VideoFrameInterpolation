@@ -3,10 +3,10 @@ import torch.nn as nn
 
 from modules.losses import *
 from models.GMTrans import Decoder2, resize
-from models.IFRNet import ResBlock, convrelu
 from modules.residual_encoder import make_layer
 from utils.flow_viz import flow_tensor_to_np
-from modules.dcnv2 import DeformableConv2d, DeformableConv2dwithFwarp
+from modules.positional_encoding import PositionEmbeddingSine
+from modules.dcnv2 import DeformableConv2d, DeformableConv2dwithFwarpv2
 
 
 class DCNInterFeatBuilder(nn.Module):
@@ -25,16 +25,17 @@ class DCNInterFeatBuilder(nn.Module):
         self.dcn0t = DeformableConv2d(nc, nc)
         self.dcn1t = DeformableConv2d(nc, nc)
         self.blendblock = nn.Sequential(
-            convrelu(nc * 2, nc),
-            ResBlock(nc, nc // 2),
+            nn.Conv2d(nc * 2, nc, 3, 1, 1),
+            nn.PReLU(nc),
+            nn.Conv2d(nc, nc, 3, 1, 1),
         )
 
-    def forward(self, f0, f1):
-        f01_offset_feat = self.convblock(torch.cat((f0, f1), 1))
-        f10_offset_feat = self.convblock(torch.cat((f1, f0), 1))
-        ft_from_f0, ft0_offset = self.dcn0t(f0, f01_offset_feat)
-        ft_from_f1, ft1_offset = self.dcn1t(f1, f10_offset_feat)
-        out = self.blendblock(torch.cat((ft_from_f0, ft_from_f1), 1))
+    def forward(self, feat0, feat1):
+        f01_offset_feat = self.convblock(torch.cat((feat0, feat1), 1))
+        f10_offset_feat = self.convblock(torch.cat((feat1, feat0), 1))
+        feat_t_from_feat0, ft0_offset = self.dcn0t(feat0, f01_offset_feat)
+        feat_t_from_feat1, ft1_offset = self.dcn1t(feat1, f10_offset_feat)
+        out = self.blendblock(torch.cat((feat_t_from_feat0, feat_t_from_feat1), 1))
         return out, ft0_offset, ft1_offset
 
 
@@ -67,9 +68,9 @@ class DCNTransv1(nn.Module):
             nn.Conv2d(args.nf, args.nf, 3, 1, 1, bias=True),
             nn.PReLU(args.nf),
         )
-
         self.dcn_feat_t_builder = DCNInterFeatBuilder(nc=args.nf)
 
+        self.pos_enc = PositionEmbeddingSine(num_pos_feats=args.nf // 2)
         self.query_builder2 = nn.ConvTranspose2d(args.nf, args.nf, 4, 2, 1)
         self.decoder2 = Decoder2(inp_dim=args.nf, depth=8, num_heads=8, window_size=4, mlp_ratio=args.mlp_ratio)
 
@@ -142,7 +143,8 @@ class DCNTransv1(nn.Module):
         pred_feat_t_3, ft0_offset, ft1_offset = self.dcn_feat_t_builder(feat0_3, feat1_3)
 
         # Attention
-        feat_t_2_query = self.query_builder2(pred_feat_t_3)
+        pred_feat_t_2 = self.query_builder2(pred_feat_t_3)
+        feat_t_2_query = pred_feat_t_2 + self.pos_enc(pred_feat_t_2)
         pred_feat_t_2 = self.decoder2(feat_t_2_query, feat0_2, feat1_2)
 
         feat_t_1_query = self.query_builder1(pred_feat_t_2)
@@ -202,20 +204,21 @@ class DCNInterFeatBuilderv2(nn.Module):
             nn.Conv2d(nc, nc, 3, 1, 1),
             nn.PReLU(nc),
         )
-        self.dcn0t = DeformableConv2dwithFwarp(nc, nc)
-        self.dcn1t = DeformableConv2dwithFwarp(nc, nc)
+        self.dcn0t = DeformableConv2dwithFwarpv2(nc, nc)
+        self.dcn1t = DeformableConv2dwithFwarpv2(nc, nc)
         self.blendblock = nn.Sequential(
-            convrelu(nc * 2, nc),
-            ResBlock(nc, nc // 2),
+            nn.Conv2d(nc * 2, nc, 3, 1, 1),
+            nn.PReLU(nc),
+            nn.Conv2d(nc, nc, 3, 1, 1),
         )
 
-    def forward(self, f0, f1, t):
-        f01_offset_feat = self.convblock(torch.cat((f0, f1), 1))
-        f10_offset_feat = self.convblock(torch.cat((f1, f0), 1))
-        ft_from_f0, ft0_offset = self.dcn0t(f0, t, f01_offset_feat)
-        ft_from_f1, ft1_offset = self.dcn1t(f1, 1 - t, f10_offset_feat)
+    def forward(self, feat0, feat1, t):
+        f01_offset_feat = self.convblock(torch.cat((feat0, feat1), 1))
+        f10_offset_feat = self.convblock(torch.cat((feat1, feat0), 1))
+        ft_from_f0, f01 = self.dcn0t(feat0, t, f01_offset_feat)
+        ft_from_f1, f10 = self.dcn1t(feat1, 1 - t, f10_offset_feat)
         out = self.blendblock(torch.cat((ft_from_f0, ft_from_f1), 1))
-        return out, ft0_offset, ft1_offset
+        return out, f01, f10
 
 
 class DCNTransv2(nn.Module):

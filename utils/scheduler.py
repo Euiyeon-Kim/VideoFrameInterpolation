@@ -5,16 +5,18 @@ import numpy as np
 from torch.optim.lr_scheduler import _LRScheduler
 
 
-def get_lr(args, iters):
-    ratio = 0.5 * (1.0 + np.cos(iters / (args.num_epochs * args.iters_per_epoch) * np.pi))
-    lr = (args.start_lr - args.end_lr) * ratio + args.end_lr
+def get_lr(args, iters, last_iter=600000):
+    if iters <= last_iter:
+        ratio = 0.5 * (1.0 + np.cos(iters / last_iter * np.pi))
+        lr = (args.start_lr - args.end_lr) * ratio + args.end_lr
+    else:
+        lr = args.end_lr
     return lr
 
 
 def set_lr(optimizer, lr):
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
-
 
 
 class CosineAnnealingLR_Restart(_LRScheduler):

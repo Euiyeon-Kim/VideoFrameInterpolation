@@ -16,7 +16,7 @@ def convrelu(in_channels, out_channels, kernel_size=3, stride=1, padding=1, dila
 
 
 class ResBlock(nn.Module):
-    def __init__(self, in_channels, side_channels, bias=True):
+    def __init__(self, in_channels, side_channels, act_at_last=True, bias=True):
         super(ResBlock, self).__init__()
         self.side_channels = side_channels
         self.conv1 = nn.Sequential(
@@ -36,14 +36,18 @@ class ResBlock(nn.Module):
             nn.PReLU(side_channels)
         )
         self.conv5 = nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1, bias=bias)
-        self.prelu = nn.PReLU(in_channels)
+        self.act_at_last = act_at_last
+        if not act_at_last:
+            self.prelu = nn.PReLU(in_channels)
 
     def forward(self, x):
         out = self.conv1(x)
         out[:, -self.side_channels:, :, :] = self.conv2(out[:, -self.side_channels:, :, :])
         out = self.conv3(out)
         out[:, -self.side_channels:, :, :] = self.conv4(out[:, -self.side_channels:, :, :])
-        out = self.prelu(x + self.conv5(out))
+        out = x + self.conv5(out)
+        if not self.act_at_last:
+            out = self.prelu(out)
         return out
 
 
