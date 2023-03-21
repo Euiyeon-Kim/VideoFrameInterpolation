@@ -221,6 +221,8 @@ class DCNTransv2(nn.Module):
         self.conv_first = nn.Sequential(
             nn.Conv2d(3, args.nf, 3, 1, 1, bias=True),
             nn.PReLU(args.nf),
+            nn.Conv2d(args.nf, args.nf, 3, 2, 1, bias=True),
+            nn.PReLU(args.nf),
         )
         self.feature_extraction = make_layer(nf=args.nf, n_layers=args.enc_res_blocks)
         self.fea_L2_conv = nn.Sequential(
@@ -230,12 +232,6 @@ class DCNTransv2(nn.Module):
             nn.PReLU(args.nf),
         )
         self.fea_L3_conv = nn.Sequential(
-            nn.Conv2d(args.nf, args.nf, 3, 2, 1, bias=True),
-            nn.PReLU(args.nf),
-            nn.Conv2d(args.nf, args.nf, 3, 1, 1, bias=True),
-            nn.PReLU(args.nf),
-        )
-        self.fea_L4_conv = nn.Sequential(
             nn.Conv2d(args.nf, args.nf, 3, 2, 1, bias=True),
             nn.PReLU(args.nf),
             nn.Conv2d(args.nf, args.nf, 3, 1, 1, bias=True),
@@ -263,8 +259,6 @@ class DCNTransv2(nn.Module):
         self.tr_loss = Ternary(7)
         self.gc_loss = Geometry(3)
         self.rb_loss = Charbonnier_Ada()
-        # self.offset_lambda = args.offset_lambda
-        # self.offset_loss = OffsetFidelityLoss(threshold=args.offset_thresh)
 
     @staticmethod
     def get_log_dict(inp_dict, results_dict):
@@ -291,8 +285,7 @@ class DCNTransv2(nn.Module):
         feat1 = self.feature_extraction(self.conv_first(x))
         feat2 = self.fea_L2_conv(feat1)
         feat3 = self.fea_L3_conv(feat2)
-        feat4 = self.fea_L4_conv(feat3)
-        return feat2, feat3, feat4
+        return feat1, feat2, feat3
 
     def generate_rgb_frame(self, feat, m):
         out = self.reconstruction(feat)
@@ -314,16 +307,17 @@ class DCNTransv2(nn.Module):
         feat1_1, feat1_2, feat1_3 = self.extract_feature(x1_)
 
         # Pred with DCN
-        pred_feat_t_3, ft0_offset, ft1_offset = self.dcn_feat_t_builder(feat0_3, feat1_3, t)
+        pred_feat_t_3, pred_ft0_3, pred_ft1_3 = self.dcn_feat_t_builder(feat0_3, feat1_3, t)
+        pred_feat_t_2 = self.query_builder2(pred_feat_t_3)
 
         # Attention
-        feat_t_2_query = self.query_builder2(pred_feat_t_3)
-        pred_feat_t_2 = self.decoder2(feat_t_2_query, feat0_2, feat1_2)
+        feat_t_2_query = self.pos_enc(pred_feat_t_2) + pred_feat_t_2
+        attended_feat_t_2 = self.decoder2(feat_t_2_query, feat0_2, feat1_2)
 
-        feat_t_1_query = self.query_builder1(pred_feat_t_2)
-        pred_feat_t_1 = self.decoder1(feat_t_1_query, feat0_1, feat1_1)
+        feat_t_1_query = self.query_builder1(attended_feat_t_2)
+        attended_feat_t_1 = self.decoder1(feat_t_1_query, feat0_1, feat1_1)
 
-        imgt_pred = self.generate_rgb_frame(pred_feat_t_1, mean_)
+        imgt_pred = self.generate_rgb_frame(attended_feat_t_1, mean_)
 
         if not self.training:
             return imgt_pred
@@ -332,25 +326,25 @@ class DCNTransv2(nn.Module):
         ft0, ft1 = inp_dict['f01'], inp_dict['f10']
         xt = inp_dict['xt'] / 255
         xt_ = xt - mean_
-        _, ft_2, ft_3 = self.extract_feature(xt_)
+        _, feat_t_2, feat_t_3 = self.extract_feature(xt_)
 
         l1_loss = self.l1_loss(imgt_pred - xt)
         census_loss = self.tr_loss(imgt_pred, xt)
-        geo_loss = 0.01 * (self.gc_loss(pred_feat_t_3, ft_3) +
-                           self.gc_loss(feat_t_2_query, ft_2))
+        geo_loss = 0.01 * (self.gc_loss(pred_feat_t_3, feat_t_3) +
+                           self.gc_loss(pred_feat_t_2, feat_t_2))
 
-        pred_ft0_offset, pred_ft1_offset = resize(ft0_offset, 8) * 8., resize(ft1_offset, 8) * 8.
-        robust_weight0 = get_robust_weight(pred_ft0_offset, ft0, beta=0.3)
-        robust_weight1 = get_robust_weight(pred_ft1_offset, ft1, beta=0.3)
-        distill_loss = 0.01 * (self.rb_loss(pred_ft0_offset - ft0, weight=robust_weight0) +
-                               self.rb_loss(pred_ft1_offset - ft1, weight=robust_weight1))
+        pred_ft0, pred_ft1 = resize(pred_ft0_3, 8) * 8., resize(pred_ft1_3, 8) * 8.
+        robust_weight0 = get_robust_weight(pred_ft0, ft0, beta=0.3)
+        robust_weight1 = get_robust_weight(pred_ft1, ft1, beta=0.3)
+        distill_loss = 0.01 * (self.rb_loss(pred_ft0 - ft0, weight=robust_weight0) +
+                               self.rb_loss(pred_ft1 - ft1, weight=robust_weight1))
 
         total_loss = l1_loss + census_loss + geo_loss + distill_loss
 
         return {
             'frame_preds': [imgt_pred],
-            'f01': pred_ft0_offset,
-            'f10': pred_ft1_offset,
+            'f01': pred_ft0,
+            'f10': pred_ft1,
         }, total_loss, {
             'total_loss': total_loss.item(),
             'l1_loss': l1_loss.item(),
