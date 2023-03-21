@@ -1,12 +1,12 @@
 import torch
 import torch.nn as nn
 
-from modules.losses import *
 from models.GMTrans import Decoder2, resize
 from modules.residual_encoder import make_layer
 from utils.flow_viz import flow_tensor_to_np
 from modules.positional_encoding import PositionEmbeddingSine
 from modules.dcnv2 import DeformableConv2d, DeformableConv2dwithFwarpv2
+from modules.losses import Ternary, Geometry, Charbonnier_Ada, Charbonnier_L1, get_robust_weight
 
 
 class DCNInterFeatBuilder(nn.Module):
@@ -308,7 +308,7 @@ class DCNTransv2(nn.Module):
         feat1_1, feat1_2, feat1_3 = self.extract_feature(x1_)
 
         # Pred with DCN
-        pred_feat_t_3, pred_ft0_3, pred_ft1_3 = self.dcn_feat_t_builder(feat0_3, feat1_3, t)
+        pred_feat_t_3, pred_f01_3, pred_f10_3 = self.dcn_feat_t_builder(feat0_3, feat1_3, t)
         pred_feat_t_2 = self.query_builder2(pred_feat_t_3)
 
         # Attention
@@ -325,7 +325,7 @@ class DCNTransv2(nn.Module):
             return imgt_pred
 
         # Calculate loss on training phase
-        ft0, ft1 = inp_dict['f01'], inp_dict['f10']
+        f01, f10 = inp_dict['f01'], inp_dict['f10']
         xt = inp_dict['xt'] / 255
         xt_ = xt - mean_
         _, feat_t_2, feat_t_3 = self.extract_feature(xt_)
@@ -335,18 +335,18 @@ class DCNTransv2(nn.Module):
         geo_loss = 0.01 * (self.gc_loss(pred_feat_t_3, feat_t_3) +
                            self.gc_loss(pred_feat_t_2, feat_t_2))
 
-        pred_ft0, pred_ft1 = resize(pred_ft0_3, 8) * 8., resize(pred_ft1_3, 8) * 8.
-        robust_weight0 = get_robust_weight(pred_ft0, ft0, beta=0.3)
-        robust_weight1 = get_robust_weight(pred_ft1, ft1, beta=0.3)
-        distill_loss = 0.01 * (self.rb_loss(pred_ft0 - ft0, weight=robust_weight0) +
-                               self.rb_loss(pred_ft1 - ft1, weight=robust_weight1))
+        pred_f01, pred_f10 = resize(pred_f01_3, 8) * 8., resize(pred_f10_3, 8) * 8.
+        robust_weight0 = get_robust_weight(pred_f01, f01, beta=0.3)
+        robust_weight1 = get_robust_weight(pred_f10, f10, beta=0.3)
+        distill_loss = 0.01 * (self.rb_loss(pred_f01 - f01, weight=robust_weight0) +
+                               self.rb_loss(pred_f10 - f10, weight=robust_weight1))
 
         total_loss = l1_loss + census_loss + geo_loss + distill_loss
 
         return {
             'frame_preds': [imgt_pred],
-            'f01': pred_ft0,
-            'f10': pred_ft1,
+            'f01': pred_f01,
+            'f10': pred_f10,
         }, total_loss, {
             'total_loss': total_loss.item(),
             'l1_loss': l1_loss.item(),

@@ -1,7 +1,7 @@
 seed: 42
 
 # Model
-model_name: DATv1
+model_name: DATv1Poc
 nf: 64
 enc_res_blocks: 5
 dec_res_blocks: 10
@@ -14,7 +14,7 @@ data_name: Vimeo90K                          # Vimeo90K, X4K
 root: datasets/vimeo_triplet                 # vimeo_triplet, X4K1000FPS
 crop_h: 224
 crop_w: 224
-batch_size: 8                                # Per GPU
+batch_size: 12                               # Per GPU
 num_workers: 8
 
 # Training
