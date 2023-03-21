@@ -319,23 +319,23 @@ class DATv1Poc(Basemodel):
         feat1_1, feat1_2, feat1_3, feat1_4 = self.cnn_encoder(x1)
 
         ft0, ft1 = inp_dict['f01'], inp_dict['f10']
-        pred_ft0_4, pred_ft1_4 = resize(ft0, 1 / 16) / 16., resize(ft1, 1 / 16) / 16.
-        pred_ft0_3, pred_ft1_3 = resize(ft0, 1 / 8) / 8., resize(ft1, 1 / 8) / 8.
-        pred_ft0_2, pred_ft1_2 = resize(ft0, 1 / 4) / 4., resize(ft1, 1 / 4) / 4.
-        pred_ft0_1, pred_ft1_1 = resize(ft0, 1 / 2) / 2., resize(ft1, 1 / 2) / 2.
+        gt_ft0_4, gt_ft1_4 = resize(ft0, 1 / 16) / 16., resize(ft1, 1 / 16) / 16.
+        gt_ft0_3, gt_ft1_3 = resize(ft0, 1 / 8) / 8., resize(ft1, 1 / 8) / 8.
+        gt_ft0_2, gt_ft1_2 = resize(ft0, 1 / 4) / 4., resize(ft1, 1 / 4) / 4.
+        gt_ft0_1, gt_ft1_1 = resize(ft0, 1 / 2) / 2., resize(ft1, 1 / 2) / 2.
 
         pred_feat_t_4, _, _ = self.dcn_feat_t_builder(feat0_4, feat1_4)
-        pred_scale_3 = self.query_builder3(torch.cat((pred_feat_t_4, pred_ft0_4, pred_ft1_4), dim=1))
+        pred_scale_3 = self.query_builder3(torch.cat((pred_feat_t_4, gt_ft0_4, gt_ft1_4), dim=1))
         pred_feat_t_3 = pred_scale_3[:, :self.nf, :, :]
         # pred_ft0_3, pred_ft1_3 = pred_scale_3[:, self.nf:self.nf+2, :, :],  pred_scale_3[:, self.nf+2:self.nf+4, :, :]
 
-        attended_feat_t_3 = self.dat_scale3(pred_feat_t_3, feat0_3, feat1_3, pred_ft0_3, pred_ft1_3)
+        attended_feat_t_3 = self.dat_scale3(pred_feat_t_3, feat0_3, feat1_3, gt_ft0_3, gt_ft1_3)
 
         query_feat_t_2 = self.query_builder2(attended_feat_t_3)
-        attended_feat_t_2 = self.dat_scale2(query_feat_t_2, feat0_2, feat1_2, pred_ft0_2, pred_ft1_2)
+        attended_feat_t_2 = self.dat_scale2(query_feat_t_2, feat0_2, feat1_2, gt_ft0_2, gt_ft1_2)
 
         query_feat_t_1 = self.query_builder1(attended_feat_t_2)
-        attended_feat_t_1 = self.dat_scale1(query_feat_t_1, feat0_1, feat1_1, pred_ft0_1, pred_ft1_1)
+        attended_feat_t_1 = self.dat_scale1(query_feat_t_1, feat0_1, feat1_1, gt_ft0_1, gt_ft1_1)
 
         imgt_pred = self.generate_rgb_frame(attended_feat_t_1, mean_)
 
@@ -361,7 +361,7 @@ class DATv1Poc(Basemodel):
         #                        self.rb_loss(8.0 * resize(pred_ft1_3, 8.0) - ft1, weight=robust_weight1) + \
         #                        self.rb_loss(16.0 * resize(pred_ft0_4, 16.0) - ft0, weight=robust_weight0) + \
         #                        self.rb_loss(16.0 * resize(pred_ft1_4, 16.0) - ft1, weight=robust_weight1))
-        total_loss = l1_loss + census_loss + geo_loss  # + distill_loss
+        total_loss = l1_loss + census_loss + geo_loss # + distill_loss
         return {
             'frame_preds': [imgt_pred],
             # 'f01': pred_ft0,

@@ -110,6 +110,9 @@ def train(args, ddp_model):
         if (epoch + 1) % args.valid_freq_epoch == 0 and local_rank == 0:
             val_results = {}
 
+            if args.val_datasets == 'None':
+                continue
+
             if 'vimeo90k' in args.val_datasets:
                 results_dict = validate_vimeo90k(args, model)
                 val_results.update(results_dict)
