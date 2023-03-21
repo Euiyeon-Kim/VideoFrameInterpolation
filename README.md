@@ -34,8 +34,18 @@
 **DCNTransv1_decRes10_GeoF3_noDistill_halfTonly (5,509,399)**
 - encoder residual layer 5개, decoder residual 10개
 
+**DCNTransv1_sepDCN_E5D10_dim64_Geo32_distill_bwarp (4,255,319)**
+**DCNTransv2_sepDCN_E5D10_dim64_Geo32_distill_featFwarp (4,255,319)**
+
+
 ### DCNTrans
 - Deformable Conv로 Query building
 - Source Target에 대해 다 attention하고 mixing
 - Deformable attention 아니고 Swin attention임
 
+### Notice
+DCNTransv1_sepDCN_E5D10_dim64_Geo32_distill_bwarp 
+DCNTransv2_sepDCN_E5D10_dim64_Geo32_distill_fwarp
+이후로 postion encoding들어가고
+encoder 크기 좀 작아지고
+DCN Blending block 크기도 작아지고 마지막에 activation 빠짐

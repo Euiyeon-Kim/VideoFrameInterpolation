@@ -1,8 +1,8 @@
-NUM_GPUS=4
+NUM_GPUS=2
 
 python -m torch.distributed.launch \
 --nproc_per_node=${NUM_GPUS} \
 train.py \
---exp_name DCNTrans/DCNTransv1_sepDCN_E5D10_dim64_Geo32_distill_bwarp \
---config configs/DCNTrans.yaml \
+--exp_name DAT/DATv1_sepDCNBwarp_shareDAT_noPE_E5D10_dim64_bwarp \
+--config configs/DAT.yaml \
 --world_size ${NUM_GPUS}
