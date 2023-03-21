@@ -1,4 +1,4 @@
-NUM_GPUS=4
+NUM_GPUS=1
 
 python -m torch.distributed.launch \
 --nproc_per_node=${NUM_GPUS} \

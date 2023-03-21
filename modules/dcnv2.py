@@ -66,6 +66,9 @@ class DeformableConv2d(nn.Module):
 
 
 class DeformableConv2dwithFwarp(nn.Module):
+    """
+        Fwarp with flow reversal
+    """
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, groups=8):
         super(DeformableConv2dwithFwarp, self).__init__()
         self.kernel_size = kernel_size
@@ -127,6 +130,9 @@ class DeformableConv2dwithFwarp(nn.Module):
 
 
 class DeformableConv2dwithFwarpv2(nn.Module):
+    """
+       Directly warp the feature
+    """
     def __init__(self, in_c, out_c, kernel_size=3, stride=1, padding=1, groups=8):
         super(DeformableConv2dwithFwarpv2, self).__init__()
         self.kernel_size = kernel_size
@@ -167,14 +173,15 @@ class DeformableConv2dwithFwarpv2(nn.Module):
 
     def forward(self, x, t, movement_feat):
         offset_flow = self.offset_flow_conv(movement_feat)   # B, 2, fH, fW
-        offset_flow_tx = - fwarp(offset_flow * t, offset_flow * t, None, 'avg')
-        feat_t_from_x = bwarp(x, offset_flow_tx)
+        fxt = offset_flow * t
+        ftx = - fwarp(fxt, fxt, None, 'avg')
 
-        out = self.conv_offset_mask(torch.cat((feat_t_from_x, movement_feat, offset_flow_tx), dim=1))
+        feat_t_from_x = fwarp(x, fxt, None, 'avg')
+        out = self.conv_offset_mask(torch.cat((feat_t_from_x, movement_feat, ftx), dim=1))
         res_o1, res_o2, mask = torch.chunk(out, 3, dim=1)
         res_offset = 2. * torch.tanh(torch.cat((res_o1, res_o2), dim=1))
 
-        offset = res_offset + offset_flow_tx.flip(1).repeat(1, res_offset.size(1) // 2, 1, 1)
+        offset = res_offset + ftx.flip(1).repeat(1, res_offset.size(1) // 2, 1, 1)
         mask = torch.sigmoid(mask)
 
         x = torchvision.ops.deform_conv2d(input=x,

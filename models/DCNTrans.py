@@ -48,6 +48,8 @@ class DCNTransv1(nn.Module):
         self.conv_first = nn.Sequential(
             nn.Conv2d(3, args.nf, 3, 1, 1, bias=True),
             nn.PReLU(args.nf),
+            nn.Conv2d(args.nf, args.nf, 3, 2, 1, bias=True),
+            nn.PReLU(args.nf),
         )
         self.feature_extraction = make_layer(nf=args.nf, n_layers=args.enc_res_blocks)
         self.fea_L2_conv = nn.Sequential(
@@ -57,12 +59,6 @@ class DCNTransv1(nn.Module):
             nn.PReLU(args.nf),
         )
         self.fea_L3_conv = nn.Sequential(
-            nn.Conv2d(args.nf, args.nf, 3, 2, 1, bias=True),
-            nn.PReLU(args.nf),
-            nn.Conv2d(args.nf, args.nf, 3, 1, 1, bias=True),
-            nn.PReLU(args.nf),
-        )
-        self.fea_L4_conv = nn.Sequential(
             nn.Conv2d(args.nf, args.nf, 3, 2, 1, bias=True),
             nn.PReLU(args.nf),
             nn.Conv2d(args.nf, args.nf, 3, 1, 1, bias=True),
@@ -117,8 +113,7 @@ class DCNTransv1(nn.Module):
         feat1 = self.feature_extraction(self.conv_first(x))
         feat2 = self.fea_L2_conv(feat1)
         feat3 = self.fea_L3_conv(feat2)
-        feat4 = self.fea_L4_conv(feat3)
-        return feat2, feat3, feat4
+        return feat1, feat2, feat3
 
     def generate_rgb_frame(self, feat, m):
         out = self.reconstruction(feat)
@@ -145,12 +140,12 @@ class DCNTransv1(nn.Module):
         # Attention
         pred_feat_t_2 = self.query_builder2(pred_feat_t_3)
         feat_t_2_query = pred_feat_t_2 + self.pos_enc(pred_feat_t_2)
-        pred_feat_t_2 = self.decoder2(feat_t_2_query, feat0_2, feat1_2)
+        attended_feat_t_2 = self.decoder2(feat_t_2_query, feat0_2, feat1_2)
 
-        feat_t_1_query = self.query_builder1(pred_feat_t_2)
-        pred_feat_t_1 = self.decoder1(feat_t_1_query, feat0_1, feat1_1)
+        feat_t_1_query = self.query_builder1(attended_feat_t_2)
+        attended_feat_t_1 = self.decoder1(feat_t_1_query, feat0_1, feat1_1)
 
-        imgt_pred = self.generate_rgb_frame(pred_feat_t_1, mean_)
+        imgt_pred = self.generate_rgb_frame(attended_feat_t_1, mean_)
 
         if not self.training:
             return imgt_pred
@@ -164,11 +159,7 @@ class DCNTransv1(nn.Module):
         l1_loss = self.l1_loss(imgt_pred - xt)
         census_loss = self.tr_loss(imgt_pred, xt)
         geo_loss = 0.01 * (self.gc_loss(pred_feat_t_3, ft_3) +
-                           self.gc_loss(feat_t_2_query, ft_2))
-
-        # resized_ft0, resized_ft1 = resize(ft0, 1 / 8) / 8., resize(ft1, 1 / 8)
-        # offset_loss = self.offset_lambda * (self.offset_loss(ft0_offset, resized_ft0) +
-        #                                     self.offset_loss(ft1_offset, resized_ft1))
+                           self.gc_loss(pred_feat_t_2, ft_2))
 
         pred_ft0_offset, pred_ft1_offset = resize(ft0_offset, 8) * 8., resize(ft1_offset, 8) * 8.
         robust_weight0 = get_robust_weight(pred_ft0_offset, ft0, beta=0.3)
@@ -215,9 +206,9 @@ class DCNInterFeatBuilderv2(nn.Module):
     def forward(self, feat0, feat1, t):
         f01_offset_feat = self.convblock(torch.cat((feat0, feat1), 1))
         f10_offset_feat = self.convblock(torch.cat((feat1, feat0), 1))
-        ft_from_f0, f01 = self.dcn0t(feat0, t, f01_offset_feat)
-        ft_from_f1, f10 = self.dcn1t(feat1, 1 - t, f10_offset_feat)
-        out = self.blendblock(torch.cat((ft_from_f0, ft_from_f1), 1))
+        feat_t_from_feat0, f01 = self.dcn0t(feat0, t, f01_offset_feat)
+        feat_t_from_feat1, f10 = self.dcn1t(feat1, 1 - t, f10_offset_feat)
+        out = self.blendblock(torch.cat((feat_t_from_feat0, feat_t_from_feat1), 1))
         return out, f01, f10
 
 
@@ -252,6 +243,7 @@ class DCNTransv2(nn.Module):
         )
 
         self.dcn_feat_t_builder = DCNInterFeatBuilderv2(nc=args.nf)
+        self.pos_enc = PositionEmbeddingSine(num_pos_feats=args.nf // 2)
 
         self.query_builder2 = nn.ConvTranspose2d(args.nf, args.nf, 4, 2, 1)
         self.decoder2 = Decoder2(inp_dim=args.nf, depth=8, num_heads=8, window_size=4, mlp_ratio=args.mlp_ratio)

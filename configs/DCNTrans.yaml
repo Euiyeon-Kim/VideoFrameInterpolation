@@ -13,9 +13,9 @@ flow_dir: flow
 distill_bwd: True                            # True: learn ft0  False: learn f01
 data_name: Vimeo90K                          # Vimeo90K, X4K
 root: datasets/vimeo_triplet                 # vimeo_triplet, X4K1000FPS
-crop_h: 224
-crop_w: 224
-batch_size: 8                                # Per GPU
+crop_h: 112
+crop_w: 112
+batch_size: 2                                # Per GPU
 num_workers: 8
 
 
@@ -31,7 +31,7 @@ save_best_benchmark: vimeo90k
 
 
 # Logging
-img_summary_freq: 1000
-metric_summary_freq: 100
+img_summary_freq: 10
+metric_summary_freq: 10
 save_latest_freq: 2000
 save_every_freq_epoch: 25
