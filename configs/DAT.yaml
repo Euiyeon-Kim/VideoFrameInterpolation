@@ -1,8 +1,8 @@
 seed: 42
 
 # Model
-model_name: DATv1Poc
-nf: 64
+model_name: DATv1
+nf: 72
 enc_res_blocks: 5
 dec_res_blocks: 10
 mlp_ratio: 2
@@ -23,7 +23,7 @@ end_lr: 1.0e-6
 last_lr_decay_epoch: 300
 num_epochs: 2000
 valid_freq_epoch: -1
-val_datasets: None
+val_datasets: vimeo90k
 save_best_benchmark: vimeo90k
 
 
