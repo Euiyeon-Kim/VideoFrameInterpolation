@@ -136,11 +136,12 @@ class DCNTransv1(nn.Module):
 
         # Pred with DCN
         pred_feat_t_3, ft0_offset, ft1_offset = self.dcn_feat_t_builder(feat0_3, feat1_3)
+        pred_feat_t_2 = self.query_builder2(pred_feat_t_3)
 
         # Attention
-        pred_feat_t_2 = self.query_builder2(pred_feat_t_3)
-        feat_t_2_query = pred_feat_t_2 + self.pos_enc(pred_feat_t_2)
-        attended_feat_t_2 = self.decoder2(feat_t_2_query, feat0_2, feat1_2)
+        position = self.pos_enc(pred_feat_t_2)
+        feat_t_2_query = pred_feat_t_2 + position
+        attended_feat_t_2 = self.decoder2(feat_t_2_query, feat0_2 + position, feat1_2 + position)
 
         feat_t_1_query = self.query_builder1(attended_feat_t_2)
         attended_feat_t_1 = self.decoder1(feat_t_1_query, feat0_1, feat1_1)
@@ -311,8 +312,9 @@ class DCNTransv2(nn.Module):
         pred_feat_t_2 = self.query_builder2(pred_feat_t_3)
 
         # Attention
-        feat_t_2_query = self.pos_enc(pred_feat_t_2) + pred_feat_t_2
-        attended_feat_t_2 = self.decoder2(feat_t_2_query, feat0_2, feat1_2)
+        position = self.pos_enc(pred_feat_t_2)
+        feat_t_2_query = pred_feat_t_2 + position
+        attended_feat_t_2 = self.decoder2(feat_t_2_query, feat0_2 + position, feat1_2 + position)
 
         feat_t_1_query = self.query_builder1(attended_feat_t_2)
         attended_feat_t_1 = self.decoder1(feat_t_1_query, feat0_1, feat1_1)

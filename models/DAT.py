@@ -14,9 +14,9 @@ class ResEncoder(nn.Module):
     def __init__(self, nf, n_res_block):
         super(ResEncoder, self).__init__()
         self.projection = nn.Sequential(
-            nn.Conv2d(3, nf, 3, 2, 1, bias=True),
+            nn.Conv2d(3, nf, 3, 1, 1, bias=True),
             nn.PReLU(nf),
-            nn.Conv2d(nf, nf, 3, 1, 1, bias=True),
+            nn.Conv2d(nf, nf, 3, 2, 1, bias=True),
             nn.PReLU(nf),
         )
         self.res_blocks = make_layer(nf=nf, n_layers=n_res_block)
