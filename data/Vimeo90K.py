@@ -23,40 +23,40 @@ class Vimeo90K(BaseDataset):
         if random.randint(0, 1):
             x0_path = f'{self.paths[idx]}/im1.png'
             x1_path = f'{self.paths[idx]}/im3.png'
-            f01 = read(f"{self.flow_paths[idx]}/{'flow_t0.flo' if self.distill_bwd else 'flow_01.npy'}")
-            f10 = read(f"{self.flow_paths[idx]}/{'flow_t1.flo' if self.distill_bwd else 'flow_10.npy'}")
+            f0x = read(f"{self.flow_paths[idx]}/{'flow_t0.flo' if self.distill_bwd else 'flow_01.npy'}")
+            f1x = read(f"{self.flow_paths[idx]}/{'flow_t1.flo' if self.distill_bwd else 'flow_10.npy'}")
         else:
             x0_path = f'{self.paths[idx]}/im3.png'
             x1_path = f'{self.paths[idx]}/im1.png'
-            f01 = read(f"{self.flow_paths[idx]}/{'flow_t1.flo' if self.distill_bwd else 'flow_10.npy'}")
-            f10 = read(f"{self.flow_paths[idx]}/{'flow_t0.flo' if self.distill_bwd else 'flow_01.npy'}")
+            f0x = read(f"{self.flow_paths[idx]}/{'flow_t1.flo' if self.distill_bwd else 'flow_10.npy'}")
+            f1x = read(f"{self.flow_paths[idx]}/{'flow_t0.flo' if self.distill_bwd else 'flow_01.npy'}")
 
         xt_path = f'{self.paths[idx]}/im2.png'
         x0 = read(x0_path)
         xt = read(xt_path)
         x1 = read(x1_path)
         frames = np.concatenate([x0, x1, xt], axis=2)
-        frames = np.concatenate([frames, f01, f10], axis=2)
+        frames = np.concatenate([frames, f0x, f1x], axis=2)
 
         frames = self.transform(frames)
         t = np.expand_dims(np.array(0.5, dtype=np.float32), 0)
 
-        x0, x1, xt, f01, f10 = torch.split(frames, [3, 3, 3, 2, 2], dim=0)
+        x0, x1, xt, f0x, f1x = torch.split(frames, [3, 3, 3, 2, 2], dim=0)
         return {
             'x0': x0,
             'x1': x1,
             'xt': xt,
             't': t,
-            'f01': f01,
-            'f10': f10,
+            'f0x': f0x,
+            'f1x': f1x,
         }
 
     def get_test_item(self, idx):
         x0 = read(f'{self.paths[idx]}/im1.png')
         xt = read(f'{self.paths[idx]}/im2.png')
         x1 = read(f'{self.paths[idx]}/im3.png')
-        f01 = read(f"{self.flow_paths[idx]}/{'flow_t1.flo' if self.distill_bwd else 'flow_10.npy'}")
-        f10 = read(f"{self.flow_paths[idx]}/{'flow_t0.flo' if self.distill_bwd else 'flow_01.npy'}")
+        f0x = read(f"{self.flow_paths[idx]}/{'flow_t1.flo' if self.distill_bwd else 'flow_10.npy'}")
+        f1x = read(f"{self.flow_paths[idx]}/{'flow_t0.flo' if self.distill_bwd else 'flow_01.npy'}")
 
         frames = np.stack([x0, x1, xt], axis=0)
         frames = frames.astype(np.float32)
@@ -65,16 +65,16 @@ class Vimeo90K(BaseDataset):
         x0, x1, xt = torch.chunk(frames, 3, dim=0)
 
         t = torch.from_numpy(np.expand_dims(np.array(0.5, dtype=np.float32), 0))
-        f01 = torch.from_numpy(f01.astype(np.float32).transpose(2, 0, 1))
-        f10 = torch.from_numpy(f10.astype(np.float32).transpose(2, 0, 1))
+        f0x = torch.from_numpy(f0x.astype(np.float32).transpose(2, 0, 1))
+        f1x = torch.from_numpy(f1x.astype(np.float32).transpose(2, 0, 1))
 
         return {
             'x0': x0[0],
             'x1': x1[0],
             'xt': xt[0],
             't': t,
-            'f01': f01,
-            'f10': f10,
+            'f0x': f0x,
+            'f1x': f1x,
         }
 
     def __getitem__(self, idx):

@@ -5,10 +5,8 @@ import cv2
 import numpy as np
 from imageio import imread
 
-
 import torch
 from torch.utils.data import Dataset
-
 
 
 def readFloat(name):

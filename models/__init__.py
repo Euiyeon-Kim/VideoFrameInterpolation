@@ -4,4 +4,4 @@ from .GMM2M import GMM2Mv1
 from .GMTrans import GMTransv1
 from .RSTT import RSTTv1
 from .DCNTrans import DCNTransv1, DCNTransv2
-from .DAT import DATv1, DATv1Poc
+from .DAT import DATv1
