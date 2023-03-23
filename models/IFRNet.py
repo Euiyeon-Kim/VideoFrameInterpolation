@@ -189,11 +189,11 @@ class IFRNet(nn.Module):
         }
 
     def forward(self, inp_dict):
-        x0, x1, xt, t = inp_dict['x0'], inp_dict['x1'], inp_dict['xt'], inp_dict['t']
+        x0, x1, t = inp_dict['x0'], inp_dict['x1'], inp_dict['t']
 
         # Preprocess data
         t = t.unsqueeze(-1).unsqueeze(-1)
-        x0, x1, xt = x0 / 255., x1 / 255., xt / 255
+        x0, x1 = x0 / 255., x1 / 255.
         mean_ = torch.cat((x0, x1), dim=2).mean(1, keepdim=True).mean(2, keepdim=True).mean(3, keepdim=True)
         x0, x1 = x0 - mean_, x1 - mean_
 
@@ -236,6 +236,7 @@ class IFRNet(nn.Module):
             return imgt_pred
 
         # Calculate loss on training phase
+        xt = inp_dict['xt'] / 255.
         f01, f10 = inp_dict['f01'], inp_dict['f10']
         l1_loss = self.l1_loss(imgt_pred - xt)
         census_loss = self.tr_loss(imgt_pred, xt)

@@ -5,19 +5,19 @@ model_name: DATv1
 nf: 64
 enc_res_blocks: 5
 dec_res_blocks: 10
-mlp_ratio: 4
+mlp_ratio: 2
 
 # Losses
 geo_lambda: 0.01
-distill_lambda: null
+distill_lambda: 0.01
 
 # Data
 flow_dir: flow
 distill_bwd: True                            # True: learn ft0  False: learn f01
 data_name: Vimeo90K                          # Vimeo90K, X4K
 root: datasets/vimeo_triplet                 # vimeo_triplet, X4K1000FPS
-crop_h: 256
-crop_w: 256
+crop_h: 224
+crop_w: 224
 batch_size: 12                               # Per GPU
 num_workers: 8
 
@@ -32,7 +32,7 @@ save_best_benchmark: vimeo90k
 
 
 # Logging
-img_summary_freq: 10
-metric_summary_freq: 10
+img_summary_freq: 1000
+metric_summary_freq: 100
 save_latest_freq: 2000
 save_every_freq_epoch: 25

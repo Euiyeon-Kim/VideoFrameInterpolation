@@ -16,7 +16,8 @@
 
 ---
 **IFRNet (4,959,692)**
-
+Time: 0.042s
+Parameters: 4.00M
 
 **IFRM2Mv1 (2,937,414)**
 - Decoder4에서 f01_4, f10_4 예측

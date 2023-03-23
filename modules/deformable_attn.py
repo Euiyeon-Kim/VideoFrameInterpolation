@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 
 class DeformAttn(nn.Module):
-    def __init__(self, in_c, out_c, n_samples, n_groups, n_heads):
+    def __init__(self, in_c, out_c, n_samples, n_heads):
         super(DeformAttn, self).__init__()
         self.in_c = in_c
         self.out_c = out_c
@@ -12,7 +12,6 @@ class DeformAttn(nn.Module):
         self.k_proj = nn.Conv2d(in_c, out_c, 1, 1, 0)
         self.v_proj = nn.Conv2d(in_c, out_c, 1, 1, 0)
 
-        self.n_groups = n_groups
         self.n_samples = n_samples
 
         self.n_head = n_heads

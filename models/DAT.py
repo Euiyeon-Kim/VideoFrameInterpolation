@@ -92,13 +92,13 @@ class CrossDeformableAttentionBlockwFlow(nn.Module):
         if pred_res_flow:
             self.conv_res_flow = nn.ConvTranspose2d(self.in_c, 2, 4, 2, 1, bias=True)
 
-        self.pos_enc = PositionEmbeddingSine(num_pos_feats=in_c // 2)
-        self.attn = DeformAttn(in_c, out_c, n_samples, n_groups, n_heads)
+        # self.pos_enc = PositionEmbeddingSine(num_pos_feats=in_c // 2)
+        self.attn = DeformAttn(in_c, out_c, n_samples * 2, n_heads)
         self.mlp = Mlp(in_features=out_c, hidden_features=out_c * mlp_ratio, out_features=out_c)
-        self.blendblock = nn.Sequential(
-            convrelu(self.out_c * 2, self.out_c),
-            convrelu(self.out_c, self.out_c),
-        )
+        # self.blendblock = nn.Sequential(
+        #     convrelu(self.out_c * 2, self.out_c),
+        #     convrelu(self.out_c, self.out_c),
+        # )
 
     @staticmethod
     def _init_zero(m):
@@ -119,7 +119,7 @@ class CrossDeformableAttentionBlockwFlow(nn.Module):
 
     def _get_ref_feats(self, feat, flow):
         b, c, fh, fw = feat.shape
-        feat = (feat + self.pos_enc(feat)).view(b * self.n_groups, self.n_group_c, fh, fw)
+        feat = feat.view(b * self.n_groups, self.n_group_c, fh, fw)
         xx = torch.linspace(-1.0, 1.0, fw).view(1, 1, 1, fw).expand(b, -1, fh, -1)
         yy = torch.linspace(-1.0, 1.0, fh).view(1, 1, fh, 1).expand(b, -1, -1, fw)
         grid = torch.cat([xx, yy], 1).to(feat).unsqueeze(1)
@@ -134,17 +134,22 @@ class CrossDeformableAttentionBlockwFlow(nn.Module):
     def forward(self, feat_t, feat0, feat1, ft0, ft1):
         feat_t0_movement = self._get_movement_feats(feat_t, feat0, ft0)
         feat0_ref_coords = self._get_ref_coords(feat_t, ft0, feat_t0_movement)     # B * nG, nS, 2, H, W
-        feat0_samples_kv = self._get_ref_feats(feat0, feat0_ref_coords)
-        feat_t_attend_feat0 = self.attn(feat_t + self.pos_enc(feat_t), feat0_samples_kv)
-        feat_t_attend_feat0 = feat_t_attend_feat0 + self.mlp(feat_t_attend_feat0)
+        feat0_samples_kv = self._get_ref_feats(feat0, feat0_ref_coords)            # b, c, nS, fh * fw
 
         feat_t1_movement = self._get_movement_feats(feat_t, feat1, ft1)
         feat1_ref_coords = self._get_ref_coords(feat_t, ft1, feat_t1_movement)
         feat1_samples_kv = self._get_ref_feats(feat1, feat1_ref_coords)
-        feat_t_attend_feat1 = self.attn(feat_t + self.pos_enc(feat_t), feat1_samples_kv)
-        feat_t_attend_feat1 = feat_t_attend_feat1 + self.mlp(feat_t_attend_feat1)
+        
+        feat_t_attend = self.attn(feat_t, torch.cat((feat0_samples_kv, feat1_samples_kv), dim=2))   
+        out = feat_t_attend + self.mlp(feat_t_attend)
 
-        out = self.blendblock(torch.cat((feat_t_attend_feat0, feat_t_attend_feat1), dim=1))
+        # feat_t_attend_feat0 = self.attn(feat_t, feat0_samples_kv)   
+        # feat_t_attend_feat0 = feat_t_attend_feat0 + self.mlp(feat_t_attend_feat0)
+
+        # feat_t_attend_feat1 = self.attn(feat_t, feat1_samples_kv)
+        # feat_t_attend_feat1 = feat_t_attend_feat1 + self.mlp(feat_t_attend_feat1)
+
+        # out = self.blendblock(torch.cat((feat_t_attend_feat0, feat_t_attend_feat1), dim=1))
         if self.pred_res_flow:
             res_ft0 = self.conv_res_flow(feat_t0_movement)
             up_ft0 = res_ft0 + 2.0 * resize(ft0, scale_factor=2.0)
@@ -167,7 +172,8 @@ class DCNInterFeatBuilderwithT(nn.Module):
             nn.Conv2d(nc, nc, 3, 1, 1),
             nn.PReLU(nc),
         )
-        self.dcn = DeformableConv2d(nc, nc)
+        self.dcnt0 = DeformableConv2d(nc, nc)
+        self.dcnt1 = DeformableConv2d(nc, nc)
         self.blendblock = nn.Sequential(
             nn.Conv2d(nc * 2, nc, 3, 1, 1),
             nn.PReLU(nc),
@@ -179,8 +185,8 @@ class DCNInterFeatBuilderwithT(nn.Module):
         concat_t = t.repeat(1, 1, fh, fw)
         f01_offset_feat = self.convblock(torch.cat((feat0, feat1, concat_t), 1))
         f10_offset_feat = self.convblock(torch.cat((feat1, feat0, 1 - concat_t), 1))
-        feat_t_from_feat0, ft0_offset = self.dcn(feat0, f01_offset_feat)
-        feat_t_from_feat1, ft1_offset = self.dcn(feat1, f10_offset_feat)
+        feat_t_from_feat0, ft0_offset = self.dcnt0(feat0, f01_offset_feat)
+        feat_t_from_feat1, ft1_offset = self.dcnt1(feat1, f10_offset_feat)
         out = self.blendblock(torch.cat((feat_t_from_feat0, feat_t_from_feat1), 1))
         return out, ft0_offset, ft1_offset
 
