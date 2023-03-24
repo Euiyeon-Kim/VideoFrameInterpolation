@@ -29,4 +29,4 @@ def make_layer(nf, n_layers):
     layers = []
     for _ in range(n_layers):
         layers.append(ResBlocknoBN(nf))
-    return nn.Sequential(*layers)
+    return layers

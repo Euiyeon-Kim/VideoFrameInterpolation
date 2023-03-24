@@ -5,6 +5,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.init as init
+import torch.nn.functional as F
+
+
+def resize(x, scale_factor):
+    return F.interpolate(x, scale_factor=scale_factor,
+                         recompute_scale_factor=False, mode="bilinear", align_corners=True)
 
 
 def set_seed(seed=1234):

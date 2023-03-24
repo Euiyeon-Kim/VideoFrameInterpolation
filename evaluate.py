@@ -116,3 +116,17 @@ def validate_vimeo90k(args, model):
     # eval_results['vimeo90k_ssim'] = final_ssim
 
     return eval_results
+
+
+if __name__ == '__main__':
+    import argparse
+    import oyaml as yaml
+    from dotmap import DotMap
+
+    parser = argparse.ArgumentParser(description='EuiyeonKim VFIs')
+    parser.add_argument('--exp_name', default='DAT/debug', type=str)
+    parser.add_argument('--test_epoch', type=int)
+    parsed = parser.parse_args()
+    with open(parsed.config, 'r') as f:
+        config = yaml.safe_load(f)
+    args = DotMap(config)

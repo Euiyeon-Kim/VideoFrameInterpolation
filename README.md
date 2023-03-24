@@ -16,8 +16,20 @@
 
 ---
 **IFRNet (4,959,692)**
-Time: 0.042s
-Parameters: 4.00M
+Time: 0.006s
+Parameters: 4.96M
+
+**DATv1 (4,959,692)**
+Time: 0.039s
+Parameters: 3.93M
+
+**EMA-VFI small**
+Time: 0.022s
+Parameters: 14.49M
+
+**EMA-VFI**
+Time: 0.077s
+Parameters: 65.66M
 
 **IFRM2Mv1 (2,937,414)**
 - Decoder4에서 f01_4, f10_4 예측

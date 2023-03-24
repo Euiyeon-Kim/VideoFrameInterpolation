@@ -3,8 +3,6 @@ import oyaml as yaml
 from dotmap import DotMap
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
 import models
 
@@ -21,24 +19,19 @@ if torch.cuda.is_available():
 
 img0 = torch.randn(1, 3, 256, 448).cuda()
 img1 = torch.randn(1, 3, 256, 448).cuda()
-embt = torch.tensor(1/2).float().view(1, 1).cuda()
-inp_dict = {
-    'x0': img0,
-    'x1': img1,
-    't': embt,
-}
+embt = torch.tensor(1/2).float().view(1, 1, 1, 1).cuda()
 
 # Build Model
 model = getattr(models, f'{args.model_name}')(args).cuda().eval()
 
 with torch.no_grad():
     for i in range(100):
-        out = model(inp_dict)
+        out = model.inference(img0, img1, embt)
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     time_stamp = time.time()
     for i in range(100):
-        out = model(inp_dict)
+        out = model.inference(img0, img1, embt)
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     print('Time: {:.3f}s'.format((time.time() - time_stamp) / 100))

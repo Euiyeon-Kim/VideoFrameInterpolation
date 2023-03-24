@@ -8,7 +8,7 @@ class Basemodel(nn.Module):
     def __init__(self, args):
         super(Basemodel, self).__init__()
         self.args = args
-        self.reconstruction = make_layer(nf=args.nf, n_layers=args.dec_res_blocks)
+        self.reconstruction = nn.Sequential(*make_layer(nf=args.nf, n_layers=args.dec_res_blocks))
         self.upconv1 = nn.Conv2d(args.nf, args.nf * 4, 3, 1, 1, bias=True)
         self.prelu1 = nn.PReLU(args.nf)
         self.pixel_shuffle = nn.PixelShuffle(2)

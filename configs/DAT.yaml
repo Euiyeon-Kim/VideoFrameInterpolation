@@ -2,10 +2,10 @@ seed: 42
 
 # Model
 model_name: DATv1
-nf: 64
-enc_res_blocks: 5
-dec_res_blocks: 10
-mlp_ratio: 2
+nf: 72
+enc_res_blocks: 0
+dec_res_blocks: 5
+mlp_ratio: 4
 
 # Losses
 geo_lambda: 0.01
@@ -16,15 +16,15 @@ flow_dir: flow
 distill_bwd: True                            # True: learn ft0  False: learn f01
 data_name: Vimeo90K                          # Vimeo90K, X4K
 root: datasets/vimeo_triplet                 # vimeo_triplet, X4K1000FPS
-crop_h: 224
-crop_w: 224
+crop_h: 256
+crop_w: 256
 batch_size: 12                               # Per GPU
 num_workers: 8
 
 # Training
 start_lr: 2.0e-4
 end_lr: 1.0e-5
-last_lr_decay_epoch: 310
+last_lr_decay_iter: 600000
 num_epochs: 2000
 valid_freq_epoch: 1
 val_datasets: vimeo90k

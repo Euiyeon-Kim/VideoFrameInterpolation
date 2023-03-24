@@ -42,7 +42,8 @@ def train(args, ddp_model):
                                   pin_memory=True, drop_last=True, sampler=sampler)
     args.iters_per_epoch = len(dataloader_train)
     iters = args.resume_epoch * args.iters_per_epoch
-    last_lr_decay_iter = args.iters_per_epoch * args.last_lr_decay_epoch
+    last_lr_decay_iter = args.last_lr_decay_iter
+
     # Build optimizer and scheduler
     optimizer = optim.AdamW(ddp_model.parameters(), lr=args.start_lr, weight_decay=0, betas=(0.9, 0.99))
 

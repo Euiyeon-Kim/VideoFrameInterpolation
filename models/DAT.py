@@ -6,29 +6,32 @@ from modules.warp import bwarp
 from models.base import Basemodel
 from modules.dcnv2 import DeformableConv2d
 from models.IFRNet import convrelu, ResBlock
+from utils import resize
 from utils.flow_viz import flow_tensor_to_np
 from modules.deformable_attn import DeformAttn
 from modules.residual_encoder import make_layer
-# from models.DCNTrans import DCNInterFeatBuilder
-from modules.positional_encoding import PositionEmbeddingSine
 from modules.losses import Ternary, Geometry, Charbonnier_Ada, Charbonnier_L1, get_robust_weight
-
-
-def resize(x, scale_factor):
-    return F.interpolate(x, scale_factor=scale_factor,
-                         recompute_scale_factor=False, mode="bilinear", align_corners=True)
 
 
 class ResEncoder(nn.Module):
     def __init__(self, nf, n_res_block):
         super(ResEncoder, self).__init__()
-        self.projection = nn.Sequential(
+        layers = [
             nn.Conv2d(3, nf, 3, 1, 1, bias=True),
             nn.PReLU(nf),
             nn.Conv2d(nf, nf, 3, 2, 1, bias=True),
             nn.PReLU(nf),
-        )
-        self.res_blocks = make_layer(nf=nf, n_layers=n_res_block)
+        ]
+        if n_res_block > 0:
+            layers.extend(make_layer(nf=nf, n_layers=n_res_block))
+        self.projection = nn.Sequential(*layers)
+        # self.projection = nn.Sequential(
+        #     nn.Conv2d(3, nf, 3, 1, 1, bias=True),
+        #     nn.PReLU(nf),
+        #     nn.Conv2d(nf, nf, 3, 2, 1, bias=True),
+        #     nn.PReLU(nf),
+        # )
+        # self.res_blocks = make_layer(nf=nf, n_layers=n_res_block)
         self.fea_L2_conv = nn.Sequential(
             nn.Conv2d(nf, nf, 3, 2, 1, bias=True),
             nn.PReLU(nf),
@@ -49,7 +52,7 @@ class ResEncoder(nn.Module):
         )
 
     def forward(self, x):
-        feat1 = self.res_blocks(self.projection(x))
+        feat1 = self.projection(x)
         feat2 = self.fea_L2_conv(feat1)
         feat3 = self.fea_L3_conv(feat2)
         feat4 = self.fea_L4_conv(feat3)
@@ -86,6 +89,7 @@ class CrossDeformableAttentionBlockwFlow(nn.Module):
             convrelu(self.in_c * 2, self.in_c),
             ResBlock(self.in_c, self.in_c // 2)
         )
+
         # Calculate residual offset
         self.conv_res_offset = nn.Conv2d(self.in_c, n_groups * n_samples * 2, 3, 1, 1)
         self.conv_res_offset.apply(self._init_zero)
@@ -242,6 +246,28 @@ class DATv1(Basemodel):
             'flow': viz_flow,
             'pred': pred_concat[0],
         }
+
+    @torch.no_grad()
+    def inference(self, x0, x1, t):
+        mean_ = torch.cat((x0, x1), dim=2).mean(1, keepdim=True).mean(2, keepdim=True).mean(3, keepdim=True)
+        x0, x1 = x0 - mean_, x1 - mean_
+        feat0_1, feat0_2, feat0_3, feat0_4 = self.cnn_encoder(x0)
+        feat1_1, feat1_2, feat1_3, feat1_4 = self.cnn_encoder(x1)
+        pred_feat_t_4, pred_ft0_4, pred_ft1_4 = self.dcn_feat_t_builder(feat0_4, feat1_4, t)
+        pred_scale_3 = self.query_builder3(torch.cat((pred_feat_t_4, pred_ft0_4, pred_ft1_4), dim=1))
+        pred_feat_t_3 = pred_scale_3[:, :self.nf, :, :]
+        pred_ft0_3, pred_ft1_3 = pred_scale_3[:, self.nf:self.nf+2, :, :],  pred_scale_3[:, self.nf+2:self.nf+4, :, :]
+
+        attended_feat_t_3, pred_ft0_2, pred_ft1_2 = self.dat_scale3(pred_feat_t_3, feat0_3, feat1_3, pred_ft0_3, pred_ft1_3)
+
+        query_feat_t_2 = self.query_builder2(attended_feat_t_3)
+        attended_feat_t_2, pred_ft0_1, pred_ft1_1 = self.dat_scale2(query_feat_t_2, feat0_2, feat1_2, pred_ft0_2, pred_ft1_2)
+
+        query_feat_t_1 = self.query_builder1(attended_feat_t_2)
+        attended_feat_t_1 = self.dat_scale1(query_feat_t_1, feat0_1, feat1_1, pred_ft0_1, pred_ft1_1)
+
+        imgt_pred = self.generate_rgb_frame(attended_feat_t_1, mean_)
+        return imgt_pred
 
     def forward(self, inp_dict):
         x0, x1, t, mean_ = self.normalize_w_rgb_mean(inp_dict['x0'], inp_dict['x1'], inp_dict['t'])
