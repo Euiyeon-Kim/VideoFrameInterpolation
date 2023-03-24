@@ -49,7 +49,7 @@ Parameters: 65.66M
 
 **DCNTransv1_sepDCN_E5D10_dim64_Geo32_distill_bwarp (4,255,319)**
 **DCNTransv2_sepDCN_E5D10_dim64_Geo32_distill_featFwarp (4,255,319)**
-
+**DATv1_sepDCNBwarpEmbT_shareAttBothDAT_noPE_E0D5_dim72_p256_bwarp (4,042,351)**
 
 ### DCNTrans
 - Deformable Conv로 Query building
@@ -62,9 +62,3 @@ DCNTransv2_sepDCN_E5D10_dim64_Geo32_distill_fwarp
 이후로 postion encoding들어가고
 encoder 크기 좀 작아지고
 DCN Blending block 크기도 작아지고 마지막에 activation 빠짐
-
-DCNTransv2_swinV2_sepDCNAvgFwarpD4_dim64_enc5dec5_GeoF32_Distill_halfTonly
-DCNTransv2_sepDCN_dim64_E5D5_Geo32_distill_flowReversal
-
-DCNTransv1_swinV2_sepDCNatD4_enc5dec10_GeoF32_Distill_halfTonly
-DCNTransv1_sepDCN_E5D10_dim72_Geo32_distill_bwarp
