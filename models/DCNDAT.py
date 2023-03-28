@@ -65,7 +65,7 @@ class DeformableConv2dGivenOffset(nn.Module):
 
     def forward(self, x, offset, mask):
         b, _, fh, fw = x.shape
-        offset = offset.permute(0, 2, 1, 3, 4).flip(1).view(b, -1, fh, fw)
+        offset = offset.permute(0, 2, 1, 3, 4).flip(1).contiguous().view(b, -1, fh, fw)
         mask = torch.sigmoid(mask)
         x = torchvision.ops.deform_conv2d(input=x,
                                           offset=offset,
@@ -216,6 +216,28 @@ class DCNDATv1(Basemodel):
         self.tr_loss = Ternary(7)
         self.rb_loss = Charbonnier_Ada()
         self.gc_loss = Geometry(3)
+
+    def inference(self, x0, x1, t):
+        mean_ = torch.cat((x0, x1), dim=2).mean(1, keepdim=True).mean(2, keepdim=True).mean(3, keepdim=True)
+        # x0, x1 = x0 - mean_, x1 - mean_
+        feat0_1, feat0_2, feat0_3, feat0_4 = self.cnn_encoder(x0)
+        feat1_1, feat1_2, feat1_3, feat1_4 = self.cnn_encoder(x1)
+        pred_feat_t_4, pred_ft0_4, pred_ft1_4 = self.dcn_feat_t_builder(feat0_4, feat1_4, t)
+        pred_scale_3 = self.query_builder3(torch.cat((pred_feat_t_4, pred_ft0_4, pred_ft1_4), dim=1))
+        pred_feat_t_3 = pred_scale_3[:, :self.nf, :, :]
+        pred_ft0_3, pred_ft1_3 = pred_scale_3[:, self.nf:self.nf+2, :, :],  pred_scale_3[:, self.nf+2:self.nf+4, :, :]
+
+        attended_feat_t_3, pred_ft0_2, pred_ft1_2 = self.dat_scale3(pred_feat_t_3, feat0_3, feat1_3, pred_ft0_3, pred_ft1_3)
+
+        query_feat_t_2 = self.query_builder2(attended_feat_t_3)
+        attended_feat_t_2, pred_ft0_1, pred_ft1_1 = self.dat_scale2(query_feat_t_2, feat0_2, feat1_2, pred_ft0_2,
+                                                                    pred_ft1_2)
+
+        query_feat_t_1 = self.query_builder1(attended_feat_t_2)
+        attended_feat_t_1 = self.dat_scale1(query_feat_t_1, feat0_1, feat1_1, pred_ft0_1, pred_ft1_1)
+
+        imgt_pred = self.generate_rgb_frame(attended_feat_t_1, mean_)
+        return imgt_pred
 
     def forward(self, inp_dict):
         x0, x1, t, mean_ = self.normalize_w_rgb_mean(inp_dict['x0'], inp_dict['x1'], inp_dict['t'])

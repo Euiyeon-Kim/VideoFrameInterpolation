@@ -1,12 +1,16 @@
+import os
 import math
 
 import numpy as np
+from tqdm import tqdm
+from imageio import imread
 
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 import data
+import models
 
 
 def gaussian(window_size, sigma):
@@ -118,15 +122,109 @@ def validate_vimeo90k(args, model):
     return eval_results
 
 
+@torch.no_grad()
+def validate_ucf101(args, model):
+    psnr_list, ssim_list = [], []
+    ucf_path = 'datasets/UCF-101/test'
+    dirs = os.listdir(ucf_path)
+    t = torch.tensor(0.5).float().view(1, 1).cuda()
+    for d in tqdm(dirs):
+        img0 = (ucf_path + '/' + d + '/frame_00.png')
+        img1 = (ucf_path + '/' + d + '/frame_02.png')
+        gt = (ucf_path + '/' + d + '/frame_01_gt.png')
+        img0 = (torch.tensor(imread(img0).transpose(2, 0, 1))).cuda().float().unsqueeze(0)
+        img1 = (torch.tensor(imread(img1).transpose(2, 0, 1))).cuda().float().unsqueeze(0)
+        gt_01 = (torch.tensor(imread(gt).transpose(2, 0, 1))).cuda().float().unsqueeze(0) / 255.
+        inp_dict = {'x0': img0, 'x1': img1, 't': t}
+        pred = model(inp_dict)
+        psnr = calculate_psnr(pred, gt_01).detach().cpu().numpy()
+        ssim = calculate_ssim(pred, gt_01).detach().cpu().numpy()
+        psnr_list.append(psnr)
+        ssim_list.append(ssim)
+
+    final_psnr = np.mean(psnr_list)
+    final_ssim = np.mean(ssim_list)
+    print(f"Validation UCF101 PSNR: {final_psnr:.4f}, SSIM: {final_ssim:.4f}")
+
+    return {
+        'ucf101_psnr': final_psnr,
+        'ucf101_ssim': final_ssim,
+    }
+
+
+@torch.no_grad()
+def validate_snu(args, model):
+    eval_dict = {}
+    snu_path = 'datasets/SNU-FILM'
+    t = torch.tensor(0.5).float().view(1, 1).cuda()
+    level_list = ['test-easy.txt', 'test-medium.txt', 'test-hard.txt', 'test-extreme.txt']
+
+    for test_file in level_list:
+        psnr_list, ssim_list = [], []
+        file_list = []
+
+        with open(os.path.join(snu_path, test_file), "r") as f:
+            for line in f:
+                line = line.strip()
+                file_list.append(line.split(' '))
+
+        for line in tqdm(file_list, desc=test_file[:-4]):
+            I0_path = line[0].replace('data', 'datasets')
+            I1_path = line[1].replace('data', 'datasets')
+            I2_path = line[2].replace('data', 'datasets')
+            I0 = (torch.tensor(imread(I0_path).transpose(2, 0, 1)).float()).unsqueeze(0).cuda()
+            gt_01 = (torch.tensor(imread(I1_path).transpose(2, 0, 1)).float() / 255.0).unsqueeze(0).cuda()
+            I2 = (torch.tensor(imread(I2_path).transpose(2, 0, 1)).float()).unsqueeze(0).cuda()
+
+            padder = data.InputPadder(I0.shape, divisor=32)
+            I0, I2 = padder.pad(I0, I2)
+
+            inp_dict = {'x0': I0, 'x1': I2, 't': t}
+            pred = model(inp_dict)
+            pred = padder.unpad(pred)
+
+            psnr = calculate_psnr(pred, gt_01).detach().cpu().numpy()
+            ssim = calculate_ssim(pred, gt_01).detach().cpu().numpy()
+
+            psnr_list.append(psnr)
+            ssim_list.append(ssim)
+
+        final_psnr = np.mean(psnr_list)
+        final_ssim = np.mean(ssim_list)
+
+        print(f"Validation {test_file[:-4]} PSNR: {final_psnr:.4f}, SSIM: {final_ssim:.4f}")
+        eval_dict.update({
+            f'snu_{test_file[:-4]}_psnr': final_psnr,
+            f'snu_{test_file[:-4]}_ssim': final_ssim,
+        })
+
+    return eval_dict
+
+
 if __name__ == '__main__':
     import argparse
     import oyaml as yaml
     from dotmap import DotMap
 
-    parser = argparse.ArgumentParser(description='EuiyeonKim VFIs')
-    parser.add_argument('--exp_name', default='DAT/debug', type=str)
+    parser = argparse.ArgumentParser(description='EuiyeonKim VFIs evaluation')
+    parser.add_argument('--exp_name', default='DAT/DATv1_sepDCNBwarp_shareDAT_noPE_E5D10_dim72_bwarp', type=str)
     parser.add_argument('--test_epoch', type=int)
     parsed = parser.parse_args()
-    with open(parsed.config, 'r') as f:
+    config_path = f'exps/{parsed.exp_name}/config.yaml'
+    with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
     args = DotMap(config)
+    args.exp_name = parsed.exp_name
+    if parsed.test_epoch:
+        ckpt_path = f'exps/{parsed.exp_name}/epoch_{parsed.test_epoch:03d}.pth'
+    else:
+        ckpt_path = f'exps/{parsed.exp_name}/best_{args.save_best_benchmark}.pth'
+
+    # Model definition
+    model = getattr(models, f'{args.model_name}')(args).cuda().eval()
+    # ckpt = torch.load(ckpt_path)['model']
+    # model.load_state_dict(ckpt, strict=True)
+    # num_params = sum(p.numel() for p in model.parameters())
+    # print('Number of params:', num_params)
+
+    eval_dict = validate_snu(args, model)

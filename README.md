@@ -24,11 +24,11 @@ Time: 0.039s
 Parameters: 3.93M
 
 **EMA-VFI small**
-Time: 0.022s
+Time: 0.014s
 Parameters: 14.49M
 
 **EMA-VFI**
-Time: 0.077s
+Time: 0.034s
 Parameters: 65.66M
 
 **IFRM2Mv1 (2,937,414)**
@@ -38,7 +38,6 @@ Parameters: 65.66M
 - Geometry loss 없음
 - Decoder 1는 output residual flow 5개
 
-
 **DCNTransv1 (2,715,457)**
 - 원래 IFRNet은 Decoder4에서 바로 feature t 생성해버림
 - 여기서는 DCN을 사용한 Query builder로 feat_t_3 생성
@@ -46,10 +45,18 @@ Parameters: 65.66M
 
 **DCNTransv1_decRes10_GeoF3_noDistill_halfTonly (5,509,399)**
 - encoder residual layer 5개, decoder residual 10개
-
 **DCNTransv1_sepDCN_E5D10_dim64_Geo32_distill_bwarp (4,255,319)**
 **DCNTransv2_sepDCN_E5D10_dim64_Geo32_distill_featFwarp (4,255,319)**
+
+### DAT 계열
+
+---
+
 **DATv1_sepDCNBwarpEmbT_shareAttBothDAT_noPE_E0D5_dim72_p256_bwarp (4,042,351)**
+**DATv1_sepDCNBwarp_shareDAT_noPE_E5D10_dim72_bwarp (5,335,111)**
+**DCNDATv1_shareDCNBwarpEmbT_QDCNAttnBothDAT_noPE_E5D10_distill_dim64_p256_bwarp (3,751,637)**  
+Time: 0.048s  
+Parameters: 3.75M
 
 ### DCNTrans
 - Deformable Conv로 Query building
