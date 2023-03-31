@@ -6,3 +6,4 @@ from .RSTT import RSTTv1
 from .DCNTrans import DCNTransv1, DCNTransv2
 from .DAT import DATv1
 from .DCNDAT import DCNDATv1
+from .MADAT import MADATv1

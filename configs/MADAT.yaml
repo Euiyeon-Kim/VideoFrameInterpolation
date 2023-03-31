@@ -1,0 +1,44 @@
+seed: 42
+
+# Model
+model_name: MADATv1
+mlp_ratio: 4.0
+channels:
+  - 16
+  - 32
+  - 64
+depths:
+  - 3
+  - 3
+  - 3
+
+# Losses
+geo_lambda: 0.01
+distill_lambda: 0.01
+
+# Data
+flow_dir: flow
+distill_bwd: True                            # True: learn ft0  False: learn f01
+data_name: Vimeo90K                          # Vimeo90K, X4K
+root: datasets/vimeo_triplet                 # vimeo_triplet, X4K1000FPS
+crop_h: 256
+crop_w: 256
+batch_size: 12                               # Per GPU
+num_workers: 8
+
+
+# Training
+start_lr: 2.0e-4
+end_lr: 2.0e-5
+last_lr_decay_iter: 800000
+num_epochs: 5000
+valid_freq_epoch: 1
+val_datasets: vimeo90k
+save_best_benchmark: vimeo90k
+
+
+# Logging
+img_summary_freq: 1000
+metric_summary_freq: 100
+save_latest_freq: 2000
+save_every_freq_epoch: 25

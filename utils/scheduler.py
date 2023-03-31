@@ -5,13 +5,24 @@ import numpy as np
 from torch.optim.lr_scheduler import _LRScheduler
 
 
-def get_lr(args, iters, last_iter=600000):
-    if iters <= last_iter:
-        ratio = 0.5 * (1.0 + np.cos(iters / last_iter * np.pi))
-        lr = (args.start_lr - args.end_lr) * ratio + args.end_lr
+def get_lr(args, cur_step, last_iter=800000):
+    if cur_step < 2000:
+        mul = cur_step / 2000.
+        return args.start_lr * mul
+    elif cur_step <= last_iter:
+        ratio = 0.5 * (1.0 + np.cos((cur_step - 2000) / (last_iter - 2000) * np.pi))
+        return (args.start_lr - args.end_lr) * ratio + args.end_lr
     else:
-        lr = args.end_lr
-    return lr
+        return args.end_lr
+
+
+# def get_lr(args, iters, last_iter=600000):
+#     if iters <= last_iter:
+#         ratio = 0.5 * (1.0 + np.cos(iters / last_iter * np.pi))
+#         lr = (args.start_lr - args.end_lr) * ratio + args.end_lr
+#     else:
+#         lr = args.end_lr
+#     return lr
 
 
 def set_lr(optimizer, lr):
