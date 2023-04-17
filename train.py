@@ -139,18 +139,17 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='EuiyeonKim VFIs')
     parser.add_argument('--exp_name', default='debug', type=str)
     parser.add_argument('--config', type=str, default='configs/IFRNet.yaml', help='Configuration YAML path')
-    parser.add_argument('--local_rank', default=0, type=int)
-    parser.add_argument('--world_size', default=1, type=int)
     parser.add_argument('--resume', default=0, type=int)
+
     # Parse Args from Configs
     parsed = parser.parse_args()
+
     with open(parsed.config, 'r') as f:
         config = yaml.safe_load(f)
     args = DotMap(config)
     args.config = parsed.config
     args.exp_name = parsed.exp_name
-    args.world_size = parsed.world_size
-    args.local_rank = parsed.local_rank
+    args.local_rank = int(os.environ['LOCAL_RANK'])
     args.log_dir = os.path.join('exps', args.exp_name)
     args.num_workers = args.batch_size
 
@@ -158,13 +157,10 @@ if __name__ == '__main__':
     args.resume_epoch = parsed.resume
 
     # Set Environment - distributed training
-    dist.init_process_group(backend='nccl', world_size=args.world_size)
-    torch.cuda.set_device(args.local_rank)
-    args.device = torch.device('cuda', args.local_rank)
+    args = utils.env.get_options(parser.parse_args())
+    DEVICE = torch.device("cuda", args.local_rank)
 
-    # Set Environment - seed & optimization
-    utils.set_seed(seed=args.seed)
-    torch.backends.cudnn.benchmark = True
+    utils.env.prepare_env(args)
 
     # Build Model
     model = getattr(models, f'{args.model_name}')(args).to(args.device)

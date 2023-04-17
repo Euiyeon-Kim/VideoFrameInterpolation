@@ -86,18 +86,18 @@ def calculate_psnr(img1, img2):
 
 
 @torch.no_grad()
-def validate_vimeo90k(args, model):
+def validate_vimeo90k(args, model, batch_size=16):
     psnr_list = []
-    # ssim_list = []
+    ssim_list = []
     eval_results = {}
 
     model.eval()
     val_dataset = data.Vimeo90K(args, is_train=False)
-    val_dataloader = DataLoader(val_dataset, batch_size=16, num_workers=16,
+    val_dataloader = DataLoader(val_dataset, batch_size=batch_size, num_workers=16,
                                 pin_memory=True, shuffle=False, drop_last=False)
     print('Number of validation images: %d' % len(val_dataset))
 
-    for batch in val_dataloader:
+    for _, batch in enumerate(tqdm(val_dataloader)):
         for k, v in batch.items():
             batch[k] = v.cuda()
 
@@ -108,16 +108,16 @@ def validate_vimeo90k(args, model):
         for i in range(b):
             psnr = calculate_psnr(pred[i], gt_01[i]).detach().cpu().numpy()
             psnr_list.append(psnr)
-            # ssim = calculate_ssim(pred, gt_01).detach().cpu().numpy()
-            # ssim_list.append(ssim)
+            ssim = calculate_ssim(pred, gt_01).detach().cpu().numpy()
+            ssim_list.append(ssim)
 
     final_psnr = np.mean(psnr_list)
     print(f"Validation Vimeo90K PSNR: {final_psnr:.4f}")
-    # final_ssim = np.mean(ssim_list)
-    # print(f"Validation Vimeo90K PSNR: {final_psnr:.4f}, SSIM: {final_ssim:.4f}")
+    final_ssim = np.mean(ssim_list)
+    print(f"Validation Vimeo90K PSNR: {final_psnr:.4f}, SSIM: {final_ssim:.4f}")
 
     eval_results['vimeo90k_psnr'] = final_psnr
-    # eval_results['vimeo90k_ssim'] = final_ssim
+    eval_results['vimeo90k_ssim'] = final_ssim
 
     return eval_results
 
@@ -176,7 +176,7 @@ def validate_snu(args, model):
             gt_01 = (torch.tensor(imread(I1_path).transpose(2, 0, 1)).float() / 255.0).unsqueeze(0).cuda()
             I2 = (torch.tensor(imread(I2_path).transpose(2, 0, 1)).float()).unsqueeze(0).cuda()
 
-            padder = data.InputPadder(I0.shape, divisor=32)
+            padder = data.InputPadder(I0.shape, divisor=16)
             I0, I2 = padder.pad(I0, I2)
 
             inp_dict = {'x0': I0, 'x1': I2, 't': t}
@@ -192,7 +192,7 @@ def validate_snu(args, model):
         final_psnr = np.mean(psnr_list)
         final_ssim = np.mean(ssim_list)
 
-        print(f"Validation {test_file[:-4]} PSNR: {final_psnr:.4f}, SSIM: {final_ssim:.4f}")
+        print(f"Validation SNU-FILM {test_file[:-4]} PSNR: {final_psnr:.4f}, SSIM: {final_ssim:.4f}")
         eval_dict.update({
             f'snu_{test_file[:-4]}_psnr': final_psnr,
             f'snu_{test_file[:-4]}_ssim': final_ssim,
@@ -207,7 +207,8 @@ if __name__ == '__main__':
     from dotmap import DotMap
 
     parser = argparse.ArgumentParser(description='EuiyeonKim VFIs evaluation')
-    parser.add_argument('--exp_name', default='DAT/DATv1_sepDCNBwarp_shareDAT_noPE_E5D10_dim72_bwarp', type=str)
+    parser.add_argument('--exp_name',
+                        default='DCNDAT/DCNDATv1_shareDCNBwarpEmbT_QDCNAttnBothDAT_noPE_E5D10_distill_dim64_p256_bwarp', type=str)
     parser.add_argument('--test_epoch', type=int)
     parsed = parser.parse_args()
     config_path = f'exps/{parsed.exp_name}/config.yaml'
@@ -222,9 +223,15 @@ if __name__ == '__main__':
 
     # Model definition
     model = getattr(models, f'{args.model_name}')(args).cuda().eval()
-    # ckpt = torch.load(ckpt_path)['model']
-    # model.load_state_dict(ckpt, strict=True)
-    # num_params = sum(p.numel() for p in model.parameters())
-    # print('Number of params:', num_params)
+    for param in model.parameters():
+        param.requires_grad = False
 
-    eval_dict = validate_snu(args, model)
+    # Load weights
+    ckpt = torch.load(ckpt_path)['model']
+    model.load_state_dict(ckpt, strict=True)
+    num_params = sum(p.numel() for p in model.parameters())
+    print('Number of params:', num_params)
+
+    eval_dict = validate_vimeo90k(args, model, batch_size=4)
+    # eval_dict = validate_ucf101(args, model)
+    # eval_dict = validate_snu(args, model)

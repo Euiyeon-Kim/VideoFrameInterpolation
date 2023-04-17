@@ -2,9 +2,9 @@ seed: 42
 
 # Model
 model_name: DATv1
-nf: 64
-enc_res_blocks: 0
-dec_res_blocks: 5
+nf: 72
+enc_res_blocks: 5
+dec_res_blocks: 10
 mlp_ratio: 2
 
 # Losses

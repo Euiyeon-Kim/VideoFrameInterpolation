@@ -1,3 +1,8 @@
+"""
+    Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+    Originated from https://github.com/facebookresearch/detr/blob/main/models/position_encoding.py
+
+"""
 import math
 
 import torch
@@ -6,8 +11,8 @@ import torch.nn as nn
 
 class PositionEmbeddingSine(nn.Module):
     """
-    This is a more standard version of the position embedding, very similar to the one
-    used by the Attention is all you need paper, generalized to work on images.
+        This is a more standard version of the position embedding, very similar to the one
+        used by the Attention is all you need paper, generalized to work on images.
     """
     def __init__(self, num_pos_feats=64, temperature=10000, normalize=True, scale=None):
         super().__init__()

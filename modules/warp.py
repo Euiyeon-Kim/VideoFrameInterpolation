@@ -59,6 +59,12 @@ def fwarp(tenIn:torch.Tensor, tenFlow:torch.Tensor, tenMetric:torch.Tensor, strM
     return tenOut
 
 
+"""
+    fwarp_using_two_frames and fwarp_mframes is originated from 
+    https://github.com/feinanshan/M2M_VFI/blob/main/Train/vfi/model/m2m.py
+"""
+
+
 def fwarp_using_two_frames(tenIn1, tenFlow1, t1, tenIn2, tenFlow2, t2, tenMetric1=None, tenMetric2=None):
     def one_fdir(tenIn, tenFlow, td, tenMetric):
         tenIn = torch.cat([tenIn * td * (tenMetric).clip(-20.0, 20.0).exp(),

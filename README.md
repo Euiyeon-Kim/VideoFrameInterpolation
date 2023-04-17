@@ -1,4 +1,7 @@
 # VideoFrameInterpolation
+Unified personal research repository  
+Some models in models.archive is not working in this framework
+
 
 ### To Try
 - [ ] m2m Flow variance 가 낮아지게 학습해보기
@@ -6,22 +9,13 @@
 - [ ] 좀 흐려보이는데 cosine positional encoding 추가해보기  
 - [ ] RAFT 처럼 attention 할 수 있는 방법 찾아보기
 
-### To Do
-- [ ] Resume training
-  - [ ] 모델 weight loading
-  - [ ] logger start step 설정
 
-
-## Models
+## Models - Baseline
 
 ---
 **IFRNet (4,959,692)**
 Time: 0.006s
 Parameters: 4.96M
-
-**DATv1 (4,959,692)**
-Time: 0.039s
-Parameters: 3.93M
 
 **EMA-VFI small**
 Time: 0.014s
@@ -31,12 +25,14 @@ Parameters: 14.49M
 Time: 0.034s
 Parameters: 65.66M
 
-**IFRM2Mv1 (2,937,414)**
-- Decoder4에서 f01_4, f10_4 예측
-- f01_4, f10_4 이미지 downsample해서 bwarp -> z0_4, z1_4 예측
-- Decoder 3, 2, 1에서 source_feat, source_bwarp_target, z_s 받아서 residual flow랑 residual z 예측
-- Geometry loss 없음
-- Decoder 1는 output residual flow 5개
+
+### DCNTrans 계열
+
+---
+
+- Deformable Conv로 Query building
+- Source Target에 대해 다 attention하고 mixing
+- Deformable attention 아니고 Swin attention임
 
 **DCNTransv1 (2,715,457)**
 - 원래 IFRNet은 Decoder4에서 바로 feature t 생성해버림
@@ -54,18 +50,15 @@ Parameters: 65.66M
 
 **DATv1_sepDCNBwarpEmbT_shareAttBothDAT_noPE_E0D5_dim72_p256_bwarp (4,042,351)**
 **DATv1_sepDCNBwarp_shareDAT_noPE_E5D10_dim72_bwarp (5,335,111)**
-**DCNDATv1_shareDCNBwarpEmbT_QDCNAttnBothDAT_noPE_E5D10_distill_dim64_p256_bwarp (3,751,637)**  
+**DATv1_sepDCNBwarpEmbT_shareAttBothDAT_noPE_E5D10_dim72_bwarp(4,977,631)**
+
+
+
+### DCNDAT 계열
+
+---
+
+**DCNDATv1_shareDCNBwarpEmbT_QDCNAttnBothDAT_noPE_E5D10_distill_dim64_p256_bwarp (3,751,637)**
 Time: 0.048s  
 Parameters: 3.75M
 
-### DCNTrans
-- Deformable Conv로 Query building
-- Source Target에 대해 다 attention하고 mixing
-- Deformable attention 아니고 Swin attention임
-
-### Notice
-DCNTransv1_sepDCN_E5D10_dim64_Geo32_distill_bwarp 
-DCNTransv2_sepDCN_E5D10_dim64_Geo32_distill_fwarp
-이후로 postion encoding들어가고
-encoder 크기 좀 작아지고
-DCN Blending block 크기도 작아지고 마지막에 activation 빠짐

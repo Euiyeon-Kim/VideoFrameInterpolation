@@ -5,11 +5,53 @@ import torch.nn.functional as F
 from modules.warp import bwarp
 from models.base import Basemodel
 from modules.dcnv2 import DeformableConv2d
-from models.IFRNet import convrelu, ResBlock
 from utils import resize
 from modules.deformable_attn import DeformAttn
 from modules.residual_encoder import make_layer
 from modules.losses import Ternary, Geometry, Charbonnier_Ada, Charbonnier_L1, get_robust_weight
+
+
+def convrelu(in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, bias=True):
+    return nn.Sequential(
+        nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias=bias),
+        nn.PReLU(out_channels)
+    )
+
+
+class ResBlock(nn.Module):
+    def __init__(self, in_channels, side_channels, act_at_last=True, bias=True):
+        super(ResBlock, self).__init__()
+        self.side_channels = side_channels
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1, bias=bias),
+            nn.PReLU(in_channels)
+        )
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(side_channels, side_channels, kernel_size=3, stride=1, padding=1, bias=bias),
+            nn.PReLU(side_channels)
+        )
+        self.conv3 = nn.Sequential(
+            nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1, bias=bias),
+            nn.PReLU(in_channels)
+        )
+        self.conv4 = nn.Sequential(
+            nn.Conv2d(side_channels, side_channels, kernel_size=3, stride=1, padding=1, bias=bias),
+            nn.PReLU(side_channels)
+        )
+        self.conv5 = nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1, bias=bias)
+        self.act_at_last = act_at_last
+        if not act_at_last:
+            self.prelu = nn.PReLU(in_channels)
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out[:, -self.side_channels:, :, :] = self.conv2(out[:, -self.side_channels:, :, :])
+        out = self.conv3(out)
+        out[:, -self.side_channels:, :, :] = self.conv4(out[:, -self.side_channels:, :, :])
+        out = x + self.conv5(out)
+        if not self.act_at_last:
+            out = self.prelu(out)
+        return out
 
 
 class ResEncoder(nn.Module):
@@ -24,13 +66,6 @@ class ResEncoder(nn.Module):
         if n_res_block > 0:
             layers.extend(make_layer(nf=nf, n_layers=n_res_block))
         self.projection = nn.Sequential(*layers)
-        # self.projection = nn.Sequential(
-        #     nn.Conv2d(3, nf, 3, 1, 1, bias=True),
-        #     nn.PReLU(nf),
-        #     nn.Conv2d(nf, nf, 3, 2, 1, bias=True),
-        #     nn.PReLU(nf),
-        # )
-        # self.res_blocks = make_layer(nf=nf, n_layers=n_res_block)
         self.fea_L2_conv = nn.Sequential(
             nn.Conv2d(nf, nf, 3, 2, 1, bias=True),
             nn.PReLU(nf),
