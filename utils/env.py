@@ -10,7 +10,7 @@ import torch.distributed as dist
 
 
 def prepare_env(args):
-    dist.init_process_group(backend="nccl", world_size=args.world_size)
+    dist.init_process_group(backend="nccl")
     torch.cuda.set_device(args.local_rank)
     args.device = torch.device('cuda', args.local_rank)
     set_seed(args.seed)
@@ -25,8 +25,7 @@ def get_options(parsed):
     args.exp_name = parsed.exp_name
     args.local_rank = int(os.environ['LOCAL_RANK'])
     args.log_dir = os.path.join('exps', args.exp_name)
-    args.num_workers = args.batch_size
-    args.resume = parsed.resume
+    args.resume = parsed.resume                 # Todo: Implement resume
     return args
 
 

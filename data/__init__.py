@@ -1,4 +1,4 @@
-from .Vimeo90K import Vimeo90K
+from .Vimeo90K import Vimeo90K, Vimeo90KwFlow
 
 import torch.nn.functional as F
 

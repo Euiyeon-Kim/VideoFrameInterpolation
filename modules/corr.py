@@ -1,25 +1,8 @@
-import math
-
 import torch
 import torch.nn as nn
 from einops import rearrange
-from timm.models.layers import trunc_normal_
+from utils import init_modules
 
-
-def init_weights(m):
-    if isinstance(m, nn.Linear):
-        trunc_normal_(m.weight, std=.02)
-        if isinstance(m, nn.Linear) and m.bias is not None:
-            nn.init.constant_(m.bias, 0)
-    elif isinstance(m, nn.LayerNorm):
-        nn.init.constant_(m.bias, 0)
-        nn.init.constant_(m.weight, 1.0)
-    elif isinstance(m, nn.Conv2d):
-        fan_out = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-        fan_out //= m.groups
-        m.weight.data.normal_(0, math.sqrt(2.0 / fan_out))
-        if m.bias is not None:
-            m.bias.data.zero_()
 
 
 def coords_grid(b, h, w, device=None):
@@ -51,7 +34,7 @@ class Mlp(nn.Module):
         self.dwconv = DWConv(hidden_features)
         self.act = nn.GELU()
         self.fc2 = nn.Linear(hidden_features, out_features)
-        self.apply(init_weights)
+        self.apply(init_modules)
 
     def forward(self, x, H, W):
         x = self.fc1(x)
@@ -83,7 +66,7 @@ class InterFrameAttention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.mlp = Mlp(dim, int(dim * mlp_ratio))
 
-        self.apply(init_weights)
+        self.apply(init_modules)
 
     def forward(self, feat0, feat1):
         _, _, H, W = feat0.shape

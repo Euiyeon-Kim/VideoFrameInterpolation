@@ -1,342 +1,155 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-from modules.warp import bwarp
-from models.base import Basemodel
-from modules.dcnv2 import DeformableConv2d
-from utils import resize
-from modules.deformable_attn import DeformAttn
-from modules.residual_encoder import make_layer
-from modules.losses import Ternary, Geometry, Charbonnier_Ada, Charbonnier_L1, get_robust_weight
-
-
-def convrelu(in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, bias=True):
-    return nn.Sequential(
-        nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias=bias),
-        nn.PReLU(out_channels)
-    )
+from .BaseModel import BaseModel
+import modules.losses as losses
+from utils.flow_viz import flow_tensor_to_np
+from modules.cnn_encoders import SameChannelResEncoder
+from modules.query_builder import DCNInterFeatBuilderwithT
+from modules.deformable_attn import CrossDeformableAttentionBlockwFlow
+from modules.generator import BasicResPixelShuffleGenerator
 
 
-class ResBlock(nn.Module):
-    def __init__(self, in_channels, side_channels, act_at_last=True, bias=True):
-        super(ResBlock, self).__init__()
-        self.side_channels = side_channels
-        self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1, bias=bias),
-            nn.PReLU(in_channels)
-        )
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(side_channels, side_channels, kernel_size=3, stride=1, padding=1, bias=bias),
-            nn.PReLU(side_channels)
-        )
-        self.conv3 = nn.Sequential(
-            nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1, bias=bias),
-            nn.PReLU(in_channels)
-        )
-        self.conv4 = nn.Sequential(
-            nn.Conv2d(side_channels, side_channels, kernel_size=3, stride=1, padding=1, bias=bias),
-            nn.PReLU(side_channels)
-        )
-        self.conv5 = nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1, bias=bias)
-        self.act_at_last = act_at_last
-        if not act_at_last:
-            self.prelu = nn.PReLU(in_channels)
-
-    def forward(self, x):
-        out = self.conv1(x)
-        out[:, -self.side_channels:, :, :] = self.conv2(out[:, -self.side_channels:, :, :])
-        out = self.conv3(out)
-        out[:, -self.side_channels:, :, :] = self.conv4(out[:, -self.side_channels:, :, :])
-        out = x + self.conv5(out)
-        if not self.act_at_last:
-            out = self.prelu(out)
-        return out
-
-
-class ResEncoder(nn.Module):
-    def __init__(self, nf, n_res_block):
-        super(ResEncoder, self).__init__()
-        layers = [
-            nn.Conv2d(3, nf, 3, 1, 1, bias=True),
-            nn.PReLU(nf),
-            nn.Conv2d(nf, nf, 3, 2, 1, bias=True),
-            nn.PReLU(nf),
-        ]
-        if n_res_block > 0:
-            layers.extend(make_layer(nf=nf, n_layers=n_res_block))
-        self.projection = nn.Sequential(*layers)
-        self.fea_L2_conv = nn.Sequential(
-            nn.Conv2d(nf, nf, 3, 2, 1, bias=True),
-            nn.PReLU(nf),
-            nn.Conv2d(nf, nf, 3, 1, 1, bias=True),
-            nn.PReLU(nf),
-        )
-        self.fea_L3_conv = nn.Sequential(
-            nn.Conv2d(nf, nf, 3, 2, 1, bias=True),
-            nn.PReLU(nf),
-            nn.Conv2d(nf, nf, 3, 1, 1, bias=True),
-            nn.PReLU(nf),
-        )
-        self.fea_L4_conv = nn.Sequential(
-            nn.Conv2d(nf, nf, 3, 2, 1, bias=True),
-            nn.PReLU(nf),
-            nn.Conv2d(nf, nf, 3, 1, 1, bias=True),
-            nn.PReLU(nf),
-        )
-
-    def forward(self, x):
-        feat1 = self.projection(x)
-        feat2 = self.fea_L2_conv(feat1)
-        feat3 = self.fea_L3_conv(feat2)
-        feat4 = self.fea_L4_conv(feat3)
-        return feat1, feat2, feat3, feat4
-
-
-class Mlp(nn.Module):
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU):
-        super().__init__()
-        out_features = out_features or in_features
-        hidden_features = hidden_features or in_features
-        self.fc1 = nn.Conv2d(in_features, hidden_features, 1, 1, 0)
-        self.act = act_layer()
-        self.fc2 = nn.Conv2d(hidden_features, out_features, 1, 1, 0)
-
-    def forward(self, x):
-        out = self.fc2(self.act(self.fc1(x)))
-        return out
-
-
-class CrossDeformableAttentionBlockwFlow(nn.Module):
-    def __init__(self, in_c, out_c, n_samples=9, n_groups=12, n_heads=12, mlp_ratio=2.0, pred_res_flow=True):
-        super(CrossDeformableAttentionBlockwFlow, self).__init__()
-        self.in_c = in_c
-        self.out_c = out_c
-        self.n_groups = n_groups
-        self.n_group_c = in_c // n_groups
-        self.n_heads = n_heads
-        self.n_samples = n_samples
-        self.pred_res_flow = pred_res_flow
-
-        self.conv_res_feat = nn.Sequential(
-            convrelu(self.in_c * 2 + 2, self.in_c * 2),
-            convrelu(self.in_c * 2, self.in_c),
-            ResBlock(self.in_c, self.in_c // 2)
-        )
-
-        # Calculate residual offset
-        self.conv_res_offset = nn.Conv2d(self.in_c, n_groups * n_samples * 2, 3, 1, 1)
-        self.conv_res_offset.apply(self._init_zero)
-        if pred_res_flow:
-            self.conv_res_flow = nn.ConvTranspose2d(self.in_c, 2, 4, 2, 1, bias=True)
-
-        # self.pos_enc = PositionEmbeddingSine(num_pos_feats=in_c // 2)
-        self.attn = DeformAttn(in_c, out_c, n_samples * 2, n_heads)
-        self.mlp = Mlp(in_features=out_c, hidden_features=out_c * mlp_ratio, out_features=out_c)
-
-    @staticmethod
-    def _init_zero(m):
-        if type(m) == nn.Conv2d:
-            m.weight.data.zero_()
-            m.bias.data.zero_()
-
-    def _get_movement_feats(self, feat_t, feat_x, ftx):
-        feat_t_from_featx = bwarp(feat_x, ftx)
-        return self.conv_res_feat(torch.cat((feat_t, feat_t_from_featx, ftx), dim=1))
-
-    def _get_ref_coords(self, feat_t, ftx, movement_feat):
-        b, c, fh, fw = feat_t.shape
-        ftx_res_offset = 2.0 * torch.tanh(self.conv_res_offset(movement_feat))
-        ftx_res_offset = ftx_res_offset.unsqueeze(1).view(b, self.n_groups * self.n_samples, 2, fh, fw)
-        ftx_ref = (ftx_res_offset + ftx.unsqueeze(1))
-        return ftx_ref
-
-    def _get_ref_feats(self, feat, flow):
-        b, c, fh, fw = feat.shape
-        feat = feat.view(b * self.n_groups, self.n_group_c, fh, fw)
-        xx = torch.linspace(-1.0, 1.0, fw).view(1, 1, 1, fw).expand(b, -1, fh, -1)
-        yy = torch.linspace(-1.0, 1.0, fh).view(1, 1, fh, 1).expand(b, -1, -1, fw)
-        grid = torch.cat([xx, yy], 1).to(feat).unsqueeze(1)
-        flow_ = torch.cat([flow[:, :, 0:1, :, :] / (fw - 1.0) / 2.0,
-                           flow[:, :, 1:2, :, :] / ((fh - 1.0) / 2.0)], dim=2)      # b, nG * nS, 2, fh, fw
-        grid_ = (grid + flow_).view(b * self.n_groups, self.n_samples, 2, fh * fw).permute(0, 1, 3, 2)      # b * nG, nS, fh * fw, 2
-
-        samples = F.grid_sample(input=feat, grid=grid_, mode='bilinear', align_corners=True)
-        samples = samples.view(b, c, self.n_samples, -1)
-        return samples  # b, c, nS, fh * fw
-
-    def forward(self, feat_t, feat0, feat1, ft0, ft1):
-        feat_t0_movement = self._get_movement_feats(feat_t, feat0, ft0)
-        feat0_ref_coords = self._get_ref_coords(feat_t, ft0, feat_t0_movement)     # B * nG, nS, 2, H, W
-        feat0_samples_kv = self._get_ref_feats(feat0, feat0_ref_coords)            # b, c, nS, fh * fw
-
-        feat_t1_movement = self._get_movement_feats(feat_t, feat1, ft1)
-        feat1_ref_coords = self._get_ref_coords(feat_t, ft1, feat_t1_movement)
-        feat1_samples_kv = self._get_ref_feats(feat1, feat1_ref_coords)
-        
-        feat_t_attend = self.attn(feat_t, torch.cat((feat0_samples_kv, feat1_samples_kv), dim=2))   
-        out = feat_t_attend + self.mlp(feat_t_attend)
-
-        # feat_t_attend_feat0 = self.attn(feat_t, feat0_samples_kv)   
-        # feat_t_attend_feat0 = feat_t_attend_feat0 + self.mlp(feat_t_attend_feat0)
-
-        # feat_t_attend_feat1 = self.attn(feat_t, feat1_samples_kv)
-        # feat_t_attend_feat1 = feat_t_attend_feat1 + self.mlp(feat_t_attend_feat1)
-
-        # out = self.blendblock(torch.cat((feat_t_attend_feat0, feat_t_attend_feat1), dim=1))
-        if self.pred_res_flow:
-            res_ft0 = self.conv_res_flow(feat_t0_movement)
-            up_ft0 = res_ft0 + 2.0 * resize(ft0, scale_factor=2.0)
-            res_ft1 = self.conv_res_flow(feat_t1_movement)
-            up_ft1 = res_ft1 + 2.0 * resize(ft1, scale_factor=2.0)
-            return out, up_ft0, up_ft1
-        return out
-
-
-class DCNInterFeatBuilderwithT(nn.Module):
-    """
-        Backward warping으로 query building
-    """
-    def __init__(self, nc):
-        super(DCNInterFeatBuilderwithT, self).__init__()
-        self.nc = nc
-        self.convblock = nn.Sequential(
-            nn.Conv2d(nc * 2 + 1, nc, 3, 1, 1),
-            nn.PReLU(nc),
-            nn.Conv2d(nc, nc, 3, 1, 1),
-            nn.PReLU(nc),
-        )
-        self.dcnt0 = DeformableConv2d(nc, nc)
-        self.dcnt1 = DeformableConv2d(nc, nc)
-        self.blendblock = nn.Sequential(
-            nn.Conv2d(nc * 2, nc, 3, 1, 1),
-            nn.PReLU(nc),
-            nn.Conv2d(nc, nc, 3, 1, 1),
-        )
-
-    def forward(self, feat0, feat1, t):
-        _, c, fh, fw = feat0.shape
-        concat_t = t.repeat(1, 1, fh, fw)
-        f01_offset_feat = self.convblock(torch.cat((feat0, feat1, concat_t), 1))
-        f10_offset_feat = self.convblock(torch.cat((feat1, feat0, 1 - concat_t), 1))
-        feat_t_from_feat0, ft0_offset = self.dcnt0(feat0, f01_offset_feat)
-        feat_t_from_feat1, ft1_offset = self.dcnt1(feat1, f10_offset_feat)
-        out = self.blendblock(torch.cat((feat_t_from_feat0, feat_t_from_feat1), 1))
-        return out, ft0_offset, ft1_offset
-
-
-class DATv1(Basemodel):
-    """
-        t 시점의 query 생성 --> t 시점의 feature 와 유사하게
-        Cross-frame attention으로 t 시점의 frame 복원
-    """
+class DATwConstantnCv1(BaseModel):
     def __init__(self, args):
-        super(DATv1, self).__init__(args)
+        super(DATwConstantnCv1, self).__init__(args)
         self.nf = args.nf
-        self.cnn_encoder = ResEncoder(args.nf, args.enc_res_blocks)
+        self.feature_encoder = SameChannelResEncoder(args.nf, args.enc_res_blocks)
 
-        self.dcn_feat_t_builder = DCNInterFeatBuilderwithT(args.nf)
-        self.query_builder3 = nn.ConvTranspose2d(args.nf + 4, args.nf + 4, 4, 2, 1)
-        self.dat_scale3 = CrossDeformableAttentionBlockwFlow(args.nf, args.nf, n_samples=9,
-                                                             n_groups=8, n_heads=8, mlp_ratio=args.mlp_ratio)
+        self.coarse_query_builder = DCNInterFeatBuilderwithT(args.nf)
+        self.lv4_to_lv3 = nn.ConvTranspose2d(args.nf + 4, args.nf + 4, 4, 2, 1)
 
-        self.query_builder2 = nn.ConvTranspose2d(args.nf, args.nf, 4, 2, 1)
-        self.dat_scale2 = CrossDeformableAttentionBlockwFlow(args.nf, args.nf, n_samples=9,
-                                                             n_groups=4, n_heads=4, mlp_ratio=args.mlp_ratio)
+        self.dat_lv3 = CrossDeformableAttentionBlockwFlow(args.nf, args.nf, n_samples=8, n_groups=4, n_heads=4,
+                                                          offset_scale=2.0, mlp_ratio=args.mlp_ratio)
 
-        self.query_builder1 = nn.ConvTranspose2d(args.nf, args.nf, 4, 2, 1)
-        self.dat_scale1 = CrossDeformableAttentionBlockwFlow(args.nf, args.nf, n_samples=9,
-                                                             n_groups=4, n_heads=4, mlp_ratio=args.mlp_ratio,
-                                                             pred_res_flow=False)
-        self.geo_lambda = args.geo_lambda
+        self.lv3_to_lv2 = nn.ConvTranspose2d(args.nf, args.nf, 4, 2, 1)
+        self.dat_lv2 = CrossDeformableAttentionBlockwFlow(args.nf, args.nf, n_samples=16, n_groups=8, n_heads=8,
+                                                          offset_scale=4.0, mlp_ratio=args.mlp_ratio)
+
+        self.lv2_to_lv1 = nn.ConvTranspose2d(args.nf, args.nf, 4, 2, 1)
+        self.dat_lv1 = CrossDeformableAttentionBlockwFlow(args.nf, args.nf, n_samples=32, n_groups=8, n_heads=8,
+                                                          offset_scale=8.0, mlp_ratio=args.mlp_ratio,
+                                                          pred_res_flow=False)
+        self.pixel_geneartor = BasicResPixelShuffleGenerator(args.nf, args.dec_res_blocks)
+
         self.distill_lambda = args.distill_lambda
-        self.l1_loss = Charbonnier_L1()
-        self.tr_loss = Ternary(7)
-        self.rb_loss = Charbonnier_Ada()
-        self.gc_loss = Geometry(3)
+        self.l1_loss = losses.Charbonnier_L1()
+        self.tr_loss = losses.Ternary(7)
+        self.rb_loss = losses.Charbonnier_Ada()
 
-    @torch.no_grad()
-    def inference(self, x0, x1, t):
-        mean_ = torch.cat((x0, x1), dim=2).mean(1, keepdim=True).mean(2, keepdim=True).mean(3, keepdim=True)
-        x0, x1 = x0 - mean_, x1 - mean_
-        feat0_1, feat0_2, feat0_3, feat0_4 = self.cnn_encoder(x0)
-        feat1_1, feat1_2, feat1_3, feat1_4 = self.cnn_encoder(x1)
-        pred_feat_t_4, pred_ft0_4, pred_ft1_4 = self.dcn_feat_t_builder(feat0_4, feat1_4, t)
-        pred_scale_3 = self.query_builder3(torch.cat((pred_feat_t_4, pred_ft0_4, pred_ft1_4), dim=1))
+    def get_img_dict(self, *args, **kwargs):
+        x0, x1, xt = self.img_dict['x0'], self.img_dict['x1'], self.img_dict['xt']
+        half = (x0 + x1) / 2
+        err_map = (xt - self.img_dict['pred']).abs()
+        pred = torch.cat((half[None], self.img_dict['pred'][None], xt[None], err_map[None]), dim=-1)
+
+        ft0_1 = self.img_dict['pred_ft0'][0]
+        ft0_2 = self.img_dict['pred_ft0'][1]
+        ft0_3 = self.img_dict['pred_ft0'][2]
+        ft0_4 = self.img_dict['pred_ft0'][3]
+        ft1_1 = self.img_dict['pred_ft1'][0]
+        ft1_2 = self.img_dict['pred_ft1'][1]
+        ft1_3 = self.img_dict['pred_ft1'][2]
+        ft1_4 = self.img_dict['pred_ft1'][3]
+        ft0_1_viz = torch.from_numpy(flow_tensor_to_np(ft0_1) / 255.).cuda()
+        ft0_2_viz = torch.from_numpy(flow_tensor_to_np(ft0_2) / 255.).cuda()
+        ft0_3_viz = torch.from_numpy(flow_tensor_to_np(ft0_3) / 255.).cuda()
+        ft0_4_viz = torch.from_numpy(flow_tensor_to_np(ft0_4) / 255.).cuda()
+        ft1_1_viz = torch.from_numpy(flow_tensor_to_np(ft1_1) / 255.).cuda()
+        ft1_2_viz = torch.from_numpy(flow_tensor_to_np(ft1_2) / 255.).cuda()
+        ft1_3_viz = torch.from_numpy(flow_tensor_to_np(ft1_3) / 255.).cuda()
+        ft1_4_viz = torch.from_numpy(flow_tensor_to_np(ft1_4) / 255.).cuda()
+
+        ft0_pseudo_gt = torch.from_numpy(flow_tensor_to_np(self.img_dict['ft0']) / 255.).cuda()
+        ft1_pseudo_gt = torch.from_numpy(flow_tensor_to_np(self.img_dict['ft1']) / 255.).cuda()
+
+        viz_flow = torch.cat((ft0_4_viz, ft0_3_viz, ft0_2_viz, ft0_1_viz,
+                              ft0_pseudo_gt, ft1_pseudo_gt,
+                              ft1_1_viz, ft1_2_viz, ft1_3_viz, ft1_4_viz), dim=-1)
+        return {
+            'pred': pred[0],
+            'flow': viz_flow,
+        }
+
+    def _generate_frame(self, x0, x1, t, set_img_dict=False):
+        x0, x1, mean_ = self.norm_w_rgb_mean(x0, x1)
+        feat0_1, feat0_2, feat0_3, feat0_4 = self.feature_encoder(x0)
+        feat1_1, feat1_2, feat1_3, feat1_4 = self.feature_encoder(x1)
+        pred_feat_t_4, pred_ft0_4, pred_ft1_4 = self.coarse_query_builder(feat0_4, feat1_4, t)
+
+        pred_scale_3 = self.lv4_to_lv3(torch.cat((pred_feat_t_4, pred_ft0_4, pred_ft1_4), dim=1))
         pred_feat_t_3 = pred_scale_3[:, :self.nf, :, :]
         pred_ft0_3, pred_ft1_3 = pred_scale_3[:, self.nf:self.nf+2, :, :],  pred_scale_3[:, self.nf+2:self.nf+4, :, :]
 
-        attended_feat_t_3, pred_ft0_2, pred_ft1_2 = self.dat_scale3(pred_feat_t_3, feat0_3, feat1_3, pred_ft0_3, pred_ft1_3)
+        attended_feat_t_3, pred_ft0_2, pred_ft1_2 = self.dat_lv3(pred_feat_t_3, feat0_3, feat1_3, pred_ft0_3, pred_ft1_3)
 
-        query_feat_t_2 = self.query_builder2(attended_feat_t_3)
-        attended_feat_t_2, pred_ft0_1, pred_ft1_1 = self.dat_scale2(query_feat_t_2, feat0_2, feat1_2, pred_ft0_2, pred_ft1_2)
+        query_feat_t_2 = self.lv3_to_lv2(attended_feat_t_3)
+        attended_feat_t_2, pred_ft0_1, pred_ft1_1 = self.dat_lv2(query_feat_t_2, feat0_2, feat1_2, pred_ft0_2, pred_ft1_2)
 
-        query_feat_t_1 = self.query_builder1(attended_feat_t_2)
-        attended_feat_t_1 = self.dat_scale1(query_feat_t_1, feat0_1, feat1_1, pred_ft0_1, pred_ft1_1)
-
-        imgt_pred = self.generate_rgb_frame(attended_feat_t_1, mean_)
-        return imgt_pred
-
-    def forward(self, inp_dict):
-        x0, x1, t, mean_ = self.normalize_w_rgb_mean(inp_dict['x0'], inp_dict['x1'], inp_dict['t'])
-        feat0_1, feat0_2, feat0_3, feat0_4 = self.cnn_encoder(x0)
-        feat1_1, feat1_2, feat1_3, feat1_4 = self.cnn_encoder(x1)
-
-        pred_feat_t_4, pred_ft0_4, pred_ft1_4 = self.dcn_feat_t_builder(feat0_4, feat1_4, t)
-        pred_scale_3 = self.query_builder3(torch.cat((pred_feat_t_4, pred_ft0_4, pred_ft1_4), dim=1))
-        pred_feat_t_3 = pred_scale_3[:, :self.nf, :, :]
-        pred_ft0_3, pred_ft1_3 = pred_scale_3[:, self.nf:self.nf+2, :, :],  pred_scale_3[:, self.nf+2:self.nf+4, :, :]
-
-        attended_feat_t_3, pred_ft0_2, pred_ft1_2 = self.dat_scale3(pred_feat_t_3, feat0_3, feat1_3, pred_ft0_3, pred_ft1_3)
-
-        query_feat_t_2 = self.query_builder2(attended_feat_t_3)
-        attended_feat_t_2, pred_ft0_1, pred_ft1_1 = self.dat_scale2(query_feat_t_2, feat0_2, feat1_2, pred_ft0_2, pred_ft1_2)
-
-        query_feat_t_1 = self.query_builder1(attended_feat_t_2)
-        attended_feat_t_1 = self.dat_scale1(query_feat_t_1, feat0_1, feat1_1, pred_ft0_1, pred_ft1_1)
-
-        imgt_pred = self.generate_rgb_frame(attended_feat_t_1, mean_)
+        query_feat_t_1 = self.lv2_to_lv1(attended_feat_t_2)
+        attended_feat_t_1 = self.dat_lv1(query_feat_t_1, feat0_1, feat1_1, pred_ft0_1, pred_ft1_1)
+        img_pred = self.pixel_geneartor(attended_feat_t_1, mean_)
 
         if not self.training:
-            return imgt_pred
+            return img_pred
 
-        # Prepare images for logging
-        pred_ft0, pred_ft1 = resize(pred_ft0_1, 2) * 2., resize(pred_ft1_1, 2) * 2.
-        img_dict = {'frame_preds': [imgt_pred], 'f0x': pred_ft0, 'f1x': pred_ft1}
+        _intermediate_for_loss = {
+            'pred_ft0': [
+                self.resize(pred_ft0_1, 2.0), self.resize(pred_ft0_2, 4.0),
+                self.resize(pred_ft1_3, 8.0), self.resize(pred_ft0_4, 16.0)
+            ],
+            'pred_ft1': [
+                self.resize(pred_ft1_1, 2.0), self.resize(pred_ft1_2, 4.0),
+                self.resize(pred_ft1_3, 8.0), self.resize(pred_ft1_4, 16.0)
+            ]
+        }
+        if set_img_dict:
+            self.img_dict = {
+                'x0': x0[0] + mean_[0],
+                'x1': x1[0] + mean_[0],
+                'pred': img_pred[0],
+                'pred_ft0': [_intermediate_for_loss['pred_ft0'][0][0], _intermediate_for_loss['pred_ft0'][1][0],
+                             _intermediate_for_loss['pred_ft0'][2][0], _intermediate_for_loss['pred_ft0'][3][0]],
+                'pred_ft1': [_intermediate_for_loss['pred_ft1'][0][0], _intermediate_for_loss['pred_ft1'][1][0],
+                             _intermediate_for_loss['pred_ft1'][2][0], _intermediate_for_loss['pred_ft1'][3][0]],
+            }
+        return img_pred, _intermediate_for_loss
 
-        # Get GT to calculate losses
+    def inference(self, x0, x1, t):
+        return self._generate_frame(x0, x1, t, False)
+
+    def forward(self, inp_dict, set_img_dict=False):
+        x0, x1, xt, t = inp_dict['x0'], inp_dict['x1'], inp_dict['xt'], inp_dict['t']
+        img_pred, _intermediate_outputs = self._generate_frame(x0, x1, t, set_img_dict)
         ft0, ft1 = inp_dict['f0x'], inp_dict['f1x']
-        xt = inp_dict['xt'] / 255
 
-        # Photometric losses
-        l1_loss = self.l1_loss(imgt_pred - xt)
-        census_loss = self.tr_loss(imgt_pred, xt)
+        if set_img_dict:
+            self.img_dict['xt'] = xt[0]
+            self.img_dict['ft0'] = ft0[0]
+            self.img_dict['ft1'] = ft1[0]
+
+        # Calculate loss
+        l1_loss = self.l1_loss(img_pred - xt)
+        census_loss = self.tr_loss(img_pred, xt)
         total_loss = l1_loss + census_loss
         log_dict = {
             'l1_loss': l1_loss.item(),
             'census_loss': census_loss.item(),
         }
 
-        # Geometric loss
-        if self.geo_lambda is not None:
-            xt_ = xt - mean_
-            _, _, feat_t_3, feat_t_4 = self.cnn_encoder(xt_)
-            geo_loss = self.geo_lambda * (self.gc_loss(pred_feat_t_3, feat_t_3) + self.gc_loss(pred_feat_t_4, feat_t_4))
-            total_loss = total_loss + geo_loss
-            log_dict.update({'geometry_loss': geo_loss.item()})
-
-        # Flow distillation loss
         if self.distill_lambda is not None:
-            robust_weight0 = get_robust_weight(pred_ft0, ft0, beta=0.3)
-            robust_weight1 = get_robust_weight(pred_ft1, ft1, beta=0.3)
-            distill_loss = self.distill_lambda * (self.rb_loss(4.0 * resize(pred_ft0_2, 4.0) - ft0, weight=robust_weight0) + \
-                                                  self.rb_loss(4.0 * resize(pred_ft1_2, 4.0) - ft1, weight=robust_weight1) + \
-                                                  self.rb_loss(8.0 * resize(pred_ft0_3, 8.0) - ft0, weight=robust_weight0) + \
-                                                  self.rb_loss(8.0 * resize(pred_ft1_3, 8.0) - ft1, weight=robust_weight1) + \
-                                                  self.rb_loss(16.0 * resize(pred_ft0_4, 16.0) - ft0, weight=robust_weight0) + \
-                                                  self.rb_loss(16.0 * resize(pred_ft1_4, 16.0) - ft1, weight=robust_weight1))
+            pred_ft0s, pred_ft1s = _intermediate_outputs['pred_ft0'], _intermediate_outputs['pred_ft1']
+
+            robust_weight0 = losses.get_robust_weight(pred_ft0s[0], ft0, beta=0.3)
+            robust_weight1 = losses.get_robust_weight(pred_ft1s[0], ft1, beta=0.3)
+            distill_loss = self.distill_lambda * (self.rb_loss(pred_ft0s[1] - ft0, weight=robust_weight0) + \
+                                                  self.rb_loss(pred_ft1s[1] - ft1, weight=robust_weight1) + \
+                                                  self.rb_loss(pred_ft0s[2] - ft0, weight=robust_weight0) + \
+                                                  self.rb_loss(pred_ft1s[2] - ft1, weight=robust_weight1) + \
+                                                  self.rb_loss(pred_ft0s[3] - ft0, weight=robust_weight0) + \
+                                                  self.rb_loss(pred_ft1s[3] - ft1, weight=robust_weight1))
             total_loss = total_loss + distill_loss
             log_dict.update({'flow_loss': distill_loss.item()})
 
         log_dict.update({'total_loss': total_loss.item()})
-        return img_dict, total_loss, log_dict
+        return total_loss, log_dict

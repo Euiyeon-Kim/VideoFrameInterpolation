@@ -1,25 +1,8 @@
-import torch
+import math
+
 import torch.nn as nn
 import torch.nn.init as init
-import torch.nn.functional as F
-
-
-def resize(x, scale_factor):
-    return F.interpolate(x, scale_factor=scale_factor,
-                         recompute_scale_factor=False, mode="bilinear", align_corners=True)
-
-
-def normalize_imgnet(frames):
-    mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(frames.device)
-    std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(frames.device)
-    frames = (frames / 255. - mean) / std
-    return frames
-
-
-def denormalize_imgnet_to01(img_tensor):
-    mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(img_tensor.device)
-    std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(img_tensor.device)
-    return (img_tensor * std) + mean
+from timm.models.layers import trunc_normal_
 
 
 def initialize_weights(net_l, scale=1):
@@ -40,3 +23,19 @@ def initialize_weights(net_l, scale=1):
             elif isinstance(m, nn.BatchNorm2d):
                 init.constant_(m.weight, 1)
                 init.constant_(m.bias.data, 0.0)
+
+
+def init_modules(m):
+    if isinstance(m, nn.Linear):
+        trunc_normal_(m.weight, std=.02)
+        if isinstance(m, nn.Linear) and m.bias is not None:
+            nn.init.constant_(m.bias, 0)
+    elif isinstance(m, nn.LayerNorm):
+        nn.init.constant_(m.bias, 0)
+        nn.init.constant_(m.weight, 1.0)
+    elif isinstance(m, nn.Conv2d):
+        fan_out = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+        fan_out //= m.groups
+        m.weight.data.normal_(0, math.sqrt(2.0 / fan_out))
+        if m.bias is not None:
+            m.bias.data.zero_()

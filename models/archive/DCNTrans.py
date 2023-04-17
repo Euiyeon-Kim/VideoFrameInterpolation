@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 
 from models.GMTrans import Decoder2, resize
-from modules.residual_encoder import make_layer
 from utils.flow_viz import flow_tensor_to_np
+from modules.basic_blocks import make_residual_layers
 from modules.positional_encoding import PositionEmbeddingSine
 from modules.dcnv2 import DeformableConv2d, DeformableConv2dwithFwarpv2
 from modules.losses import Ternary, Geometry, Charbonnier_Ada, Charbonnier_L1, get_robust_weight

@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 def get_robust_weight(flow_pred, flow_gt, beta):
@@ -21,7 +21,7 @@ class Ternary(nn.Module):
         out_channels = patch_size * patch_size
         self.w = np.eye(out_channels).reshape((patch_size, patch_size, 1, out_channels))
         self.w = np.transpose(self.w, (3, 2, 0, 1))
-        self.w = torch.tensor(self.w).float().to(device)
+        self.w = torch.tensor(self.w).float().to(DEVICE)
 
     def transform(self, tensor):
         tensor_ = tensor.mean(dim=1, keepdim=True)
@@ -54,7 +54,7 @@ class Geometry(nn.Module):
         out_channels = patch_size * patch_size
         self.w = np.eye(out_channels).reshape((patch_size, patch_size, 1, out_channels))
         self.w = np.transpose(self.w, (3, 2, 0, 1))
-        self.w = torch.tensor(self.w).float().to(device)
+        self.w = torch.tensor(self.w).float().to(DEVICE)
 
     def transform(self, tensor):
         b, c, h, w = tensor.size()

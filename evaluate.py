@@ -86,9 +86,8 @@ def calculate_psnr(img1, img2):
 
 
 @torch.no_grad()
-def validate_vimeo90k(args, model, batch_size=16):
-    psnr_list = []
-    ssim_list = []
+def validate_vimeo90k(args, model, batch_size=1, report_ssim=False):
+    psnr_list, ssim_list = [], []
     eval_results = {}
 
     model.eval()
@@ -97,66 +96,75 @@ def validate_vimeo90k(args, model, batch_size=16):
                                 pin_memory=True, shuffle=False, drop_last=False)
     print('Number of validation images: %d' % len(val_dataset))
 
-    for _, batch in enumerate(tqdm(val_dataloader)):
-        for k, v in batch.items():
-            batch[k] = v.cuda()
-
-        gt_01 = batch['xt'] / 255.
-        pred = model(batch)
+    for batch in val_dataloader:
+        x0 = batch['x0'].cuda()
+        x1 = batch['x1'].cuda()
+        xt = batch['xt'].cuda()
+        t = batch['t'].cuda()
+        pred = model.inference(x0, x1, t)
 
         b = pred.shape[0]
         for i in range(b):
-            psnr = calculate_psnr(pred[i], gt_01[i]).detach().cpu().numpy()
+            psnr = calculate_psnr(pred[i], xt[i]).detach().cpu().numpy()
             psnr_list.append(psnr)
-            ssim = calculate_ssim(pred, gt_01).detach().cpu().numpy()
-            ssim_list.append(ssim)
+            if report_ssim:
+                ssim = calculate_ssim(pred, xt).detach().cpu().numpy()
+                ssim_list.append(ssim)
 
     final_psnr = np.mean(psnr_list)
-    print(f"Validation Vimeo90K PSNR: {final_psnr:.4f}")
-    final_ssim = np.mean(ssim_list)
-    print(f"Validation Vimeo90K PSNR: {final_psnr:.4f}, SSIM: {final_ssim:.4f}")
+    log_txt = f"Validation Vimeo90K PSNR: {final_psnr:.4f}"
+    eval_results['val/vimeo90k_psnr'] = final_psnr
 
-    eval_results['vimeo90k_psnr'] = final_psnr
-    eval_results['vimeo90k_ssim'] = final_ssim
+    if report_ssim:
+        final_ssim = np.mean(ssim_list)
+        eval_results['val/vimeo90k_ssim'] = final_ssim
+        log_txt = log_txt + f", SSIM: {final_ssim:.4f}"
 
+    print(log_txt)
     return eval_results
 
 
 @torch.no_grad()
-def validate_ucf101(args, model):
+def validate_ucf101(model, report_ssim=False):
     psnr_list, ssim_list = [], []
+    eval_results = {}
     ucf_path = 'datasets/UCF-101/test'
     dirs = os.listdir(ucf_path)
-    t = torch.tensor(0.5).float().view(1, 1).cuda()
+    print('Number of validation images: %d' % len(dirs))
+
+    t = torch.ones((1, 1, 1, 1)).cuda().float() * 0.5
     for d in tqdm(dirs):
         img0 = (ucf_path + '/' + d + '/frame_00.png')
         img1 = (ucf_path + '/' + d + '/frame_02.png')
         gt = (ucf_path + '/' + d + '/frame_01_gt.png')
-        img0 = (torch.tensor(imread(img0).transpose(2, 0, 1))).cuda().float().unsqueeze(0)
-        img1 = (torch.tensor(imread(img1).transpose(2, 0, 1))).cuda().float().unsqueeze(0)
+        img0 = (torch.tensor(imread(img0).transpose(2, 0, 1))).cuda().float().unsqueeze(0) / 255.
+        img1 = (torch.tensor(imread(img1).transpose(2, 0, 1))).cuda().float().unsqueeze(0) / 255.
         gt_01 = (torch.tensor(imread(gt).transpose(2, 0, 1))).cuda().float().unsqueeze(0) / 255.
-        inp_dict = {'x0': img0, 'x1': img1, 't': t}
-        pred = model(inp_dict)
+        pred = model.inference(img0, img1, t)
         psnr = calculate_psnr(pred, gt_01).detach().cpu().numpy()
-        ssim = calculate_ssim(pred, gt_01).detach().cpu().numpy()
         psnr_list.append(psnr)
-        ssim_list.append(ssim)
+        if report_ssim:
+            ssim = calculate_ssim(pred, gt_01).detach().cpu().numpy()
+            ssim_list.append(ssim)
 
     final_psnr = np.mean(psnr_list)
-    final_ssim = np.mean(ssim_list)
-    print(f"Validation UCF101 PSNR: {final_psnr:.4f}, SSIM: {final_ssim:.4f}")
+    eval_results['val/ucf101_psnr'] = final_psnr
+    log_txt = f"Validation UCF101 PSNR: {final_psnr:.4f}"
 
-    return {
-        'ucf101_psnr': final_psnr,
-        'ucf101_ssim': final_ssim,
-    }
+    if report_ssim:
+        final_ssim = np.mean(ssim_list)
+        log_txt = log_txt + f", SSIM: {final_ssim:.4f}"
+        eval_results['val/ucf101_ssim'] = final_ssim
+
+    print(log_txt)
+    return eval_results
 
 
 @torch.no_grad()
-def validate_snu(args, model):
-    eval_dict = {}
+def validate_snu(model, report_ssim=False):
+    eval_results = {}
     snu_path = 'datasets/SNU-FILM'
-    t = torch.tensor(0.5).float().view(1, 1).cuda()
+    t = torch.ones((1, 1, 1, 1)).cuda().float() * 0.5
     level_list = ['test-easy.txt', 'test-medium.txt', 'test-hard.txt', 'test-extreme.txt']
 
     for test_file in level_list:
@@ -172,33 +180,34 @@ def validate_snu(args, model):
             I0_path = line[0].replace('data', 'datasets')
             I1_path = line[1].replace('data', 'datasets')
             I2_path = line[2].replace('data', 'datasets')
-            I0 = (torch.tensor(imread(I0_path).transpose(2, 0, 1)).float()).unsqueeze(0).cuda()
+            I0 = (torch.tensor(imread(I0_path).transpose(2, 0, 1)).float() / 255.0).unsqueeze(0).cuda()
             gt_01 = (torch.tensor(imread(I1_path).transpose(2, 0, 1)).float() / 255.0).unsqueeze(0).cuda()
-            I2 = (torch.tensor(imread(I2_path).transpose(2, 0, 1)).float()).unsqueeze(0).cuda()
+            I2 = (torch.tensor(imread(I2_path).transpose(2, 0, 1)).float() / 255.0).unsqueeze(0).cuda()
 
             padder = data.InputPadder(I0.shape, divisor=16)
             I0, I2 = padder.pad(I0, I2)
 
-            inp_dict = {'x0': I0, 'x1': I2, 't': t}
-            pred = model(inp_dict)
+            pred = model.inference(I0, I2, t)
             pred = padder.unpad(pred)
 
             psnr = calculate_psnr(pred, gt_01).detach().cpu().numpy()
-            ssim = calculate_ssim(pred, gt_01).detach().cpu().numpy()
-
             psnr_list.append(psnr)
-            ssim_list.append(ssim)
+            if report_ssim:
+                ssim = calculate_ssim(pred, gt_01).detach().cpu().numpy()
+                ssim_list.append(ssim)
 
         final_psnr = np.mean(psnr_list)
-        final_ssim = np.mean(ssim_list)
+        log_txt = f"Validation SNU-FILM {test_file[:-4]} PSNR: {final_psnr:.4f}"
+        eval_results[f'val/snu_{test_file[:-4]}_psnr'] = final_psnr
 
-        print(f"Validation SNU-FILM {test_file[:-4]} PSNR: {final_psnr:.4f}, SSIM: {final_ssim:.4f}")
-        eval_dict.update({
-            f'snu_{test_file[:-4]}_psnr': final_psnr,
-            f'snu_{test_file[:-4]}_ssim': final_ssim,
-        })
+        if report_ssim:
+            final_ssim = np.mean(ssim_list)
+            log_txt = log_txt + f"SSIM: {final_ssim:.4f}"
+            eval_results[f'val/snu_{test_file[:-4]}_psnr'] = final_psnr
 
-    return eval_dict
+        print(log_txt)
+
+    return eval_results
 
 
 if __name__ == '__main__':

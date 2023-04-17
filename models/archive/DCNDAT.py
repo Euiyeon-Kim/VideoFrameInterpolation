@@ -5,12 +5,13 @@ import torch.nn.functional as F
 
 from modules.warp import bwarp
 from modules.dcnv2 import DeformableConv2d
-from modules.residual_encoder import make_layer
 from modules.deformable_attn import DeformAttn
+from modules.basic_blocks import make_residual_layers
 from modules.losses import Ternary, Geometry, Charbonnier_Ada, Charbonnier_L1, get_robust_weight
 from models.base import Basemodel
 from models.DAT import Mlp
-from models.IFRNet import convrelu, ResBlock
+from modules.basic_blocks import conv_prelu as convrelu
+from modules.basic_blocks import HalfChannelConv5ResBlock as ResBlock
 from utils import resize
 
 
