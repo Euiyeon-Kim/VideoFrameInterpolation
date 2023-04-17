@@ -7,3 +7,4 @@
 
 from .DAT import DATv1
 from .DCNDAT import DCNDATv1
+from .MADAT import MADATv1
