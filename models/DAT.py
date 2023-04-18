@@ -96,7 +96,7 @@ class DATwConstantnCv1(BaseModel):
         _intermediate_for_loss = {
             'pred_ft0': [
                 self.resize(pred_ft0_1, 2.0), self.resize(pred_ft0_2, 4.0),
-                self.resize(pred_ft1_3, 8.0), self.resize(pred_ft0_4, 16.0)
+                self.resize(pred_ft0_3, 8.0), self.resize(pred_ft0_4, 16.0)
             ],
             'pred_ft1': [
                 self.resize(pred_ft1_1, 2.0), self.resize(pred_ft1_2, 4.0),
